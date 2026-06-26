@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <link rel="stylesheet" href="popup.css" />
+</head>
+<body>
+
+  <!-- Login view -->
+  <div id="login-view">
+    <div class="logo-area">
+      <span class="logo">📥</span>
+      <span class="app-name">QuickCapture</span>
+    </div>
+    <p class="label">Sign in to save</p>
+    <input type="text" id="email" placeholder="Username" autocomplete="username" autocorrect="off" autocapitalize="off" />
+    <input type="password" id="password" placeholder="Password" autocomplete="current-password" />
+    <p id="auth-error" class="error"></p>
+    <button id="signin-btn" class="btn">Sign In</button>
+  </div>
+
+  <!-- Save view -->
+  <div id="save-view" style="display:none">
+    <div class="header">
+      <div class="logo-area">
+        <span class="logo">📥</span>
+        <span class="app-name">QuickCapture</span>
+      </div>
+      <button id="signout-btn" class="signout">Sign out</button>
+    </div>
+
+    <div class="page-info">
+      <p id="page-title" class="page-title"></p>
+      <p id="page-url" class="page-url"></p>
+    </div>
+
+    <textarea id="note" placeholder="Add a note (optional)..."></textarea>
+
+    <button id="save-btn" class="btn">✨ Save to QuickCapture</button>
+    <p id="save-status" class="status"></p>
+  </div>
+
+  <script src="config.js"></script>
+  <script src="popup.js"></script>
+</body>
+</html>

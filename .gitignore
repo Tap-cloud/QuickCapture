@@ -33,6 +33,9 @@ yarn-error.*
 # local env files
 .env*.local
 
+# extension credentials (copy config.example.js to config.js and fill in)
+extension/config.js
+
 # typescript
 *.tsbuildinfo
 
