@@ -1,0 +1,566 @@
+import { useState, useEffect } from 'react';
+import {
+  View, Text, ScrollView, TouchableOpacity, Image, Modal,
+  TextInput, StyleSheet, Platform, Linking, Alert,
+  KeyboardAvoidingView, ActivityIndicator,
+} from 'react-native';
+import { LinearGradient } from 'expo-linear-gradient';
+import { Ionicons } from '@expo/vector-icons';
+import {
+  Capture, UserCollection,
+  loadUserCollections, createUserCollection, deleteUserCollection,
+} from './storage';
+import { COLLECTION_TAGS } from './tagger';
+
+// ── Constants ────────────────────────────────────────────────
+
+const GRADIENTS: [string, string][] = [
+  ['#EEF2FF', '#DDE6FF'], ['#FFF7ED', '#FEE9CC'], ['#ECFDF5', '#D1FAE5'],
+  ['#FFF1F2', '#FFE0E3'], ['#F0F9FF', '#DBEEFE'], ['#FEFCE8', '#FEF3C0'],
+  ['#F5F3FF', '#E5DEFF'], ['#FDF4FF', '#F3E8FF'],
+];
+
+const AUTO_EMOJIS: Record<string, string> = {
+  recipe: '🍜', food: '🍜', cooking: '🍳', ramen: '🍜', meal: '🍽️',
+  travel: '✈️', japan: '🗾', paris: '🗼', trip: '🗺️',
+  startup: '💡', business: '💼', finance: '💰', investing: '📈',
+  book: '📚', books: '📚', reading: '📖',
+  tech: '💻', coding: '👨‍💻', programming: '💻',
+  fitness: '💪', workout: '🏋️', health: '🏥', exercise: '🏃',
+  video: '🎥', youtube: '▶️', film: '🎬',
+  music: '🎵', art: '🎨', design: '✏️',
+  article: '📰', news: '📰', link: '🔗',
+};
+
+const EMOJI_OPTIONS = [
+  '📁','📚','🎵','🎬','🍜','🍕','✈️','💡','💼','💰',
+  '📈','🏋️','💻','🎨','📰','🔗','🏠','🎮','🌍','❤️',
+  '⭐','🔖','📝','🎯','🛒','📷','☕','🏖️','🧳','🎪',
+];
+
+// ── Types ────────────────────────────────────────────────────
+
+interface AutoCollection {
+  tag: string;
+  name: string;
+  count: number;
+  thumbnail?: string;
+  colors: [string, string];
+  emoji: string;
+}
+
+interface DetailConfig {
+  type: 'manual' | 'auto';
+  name: string;
+  emoji: string;
+  tag?: string;
+}
+
+// ── Helpers ──────────────────────────────────────────────────
+
+function buildAutoCollections(captures: Capture[]): AutoCollection[] {
+  const map = new Map<string, { count: number; thumbnail?: string }>();
+  for (const c of captures) {
+    for (const tag of c.tags) {
+      if (!COLLECTION_TAGS.has(tag)) continue;
+      const e = map.get(tag);
+      if (e) { e.count++; if (!e.thumbnail && c.thumbnail_url) e.thumbnail = c.thumbnail_url; }
+      else map.set(tag, { count: 1, thumbnail: c.thumbnail_url ?? undefined });
+    }
+  }
+  return [...map.entries()]
+    .filter(([, v]) => v.count >= 2)
+    .sort(([, a], [, b]) => b.count - a.count)
+    .slice(0, 12)
+    .map(([tag, { count, thumbnail }], i) => ({
+      tag, name: tag.charAt(0).toUpperCase() + tag.slice(1),
+      count, thumbnail, colors: GRADIENTS[i % GRADIENTS.length],
+      emoji: AUTO_EMOJIS[tag] ?? '📁',
+    }));
+}
+
+function captureMatchesManual(capture: Capture, collectionName: string): boolean {
+  const words = collectionName.toLowerCase().replace(/[^a-z0-9\s]/g, '').split(/\s+/).filter(w => w.length >= 3);
+  if (words.length === 0) return false;
+  const tags = capture.tags.map(t => t.toLowerCase());
+  const text = [capture.title, capture.content, capture.summary, capture.category, capture.site_name]
+    .filter(Boolean).join(' ').toLowerCase();
+  return words.some(w => tags.some(t => t.includes(w) || w.includes(t)) || text.includes(w));
+}
+
+function getDomain(url?: string) {
+  if (!url) return '';
+  try { return new URL(url).hostname.replace('www.', ''); } catch { return ''; }
+}
+
+function timeAgo(d: string) {
+  const mins = Math.floor((Date.now() - new Date(d).getTime()) / 60000);
+  if (mins < 1) return 'Just now';
+  if (mins < 60) return `${mins}m ago`;
+  const h = Math.floor(mins / 60);
+  if (h < 24) return `${h}h ago`;
+  return `${Math.floor(h / 24)}d ago`;
+}
+
+// ── Detail item ──────────────────────────────────────────────
+
+function DetailItem({ item }: { item: Capture }) {
+  const domain = getDomain(item.url);
+  const initial = (item.site_name || item.title || 'Q').charAt(0).toUpperCase();
+  return (
+    <TouchableOpacity
+      style={ds.item}
+      onPress={() => item.url ? Linking.openURL(item.url) : null}
+      activeOpacity={item.url ? 0.75 : 1}
+    >
+      {item.thumbnail_url ? (
+        <Image source={{ uri: item.thumbnail_url }} style={ds.thumb} resizeMode="cover" />
+      ) : (
+        <View style={[ds.thumb, ds.thumbPlaceholder]}>
+          <Text style={ds.thumbInitial}>{initial}</Text>
+        </View>
+      )}
+      <View style={ds.info}>
+        <Text style={ds.title} numberOfLines={2}>{item.title || item.content}</Text>
+        {item.summary ? <Text style={ds.summary} numberOfLines={1}>{item.summary}</Text> : null}
+        <View style={ds.meta}>
+          {(item.site_name || domain) ? <Text style={ds.metaText}>{item.site_name || domain} · </Text> : null}
+          <Text style={ds.metaText}>{timeAgo(item.created_at)}</Text>
+        </View>
+      </View>
+      <Ionicons name="chevron-forward" size={16} color="#E2E8F0" />
+    </TouchableOpacity>
+  );
+}
+
+// ── Collection detail view ───────────────────────────────────
+
+function CollectionDetail({ config, captures, onBack }: { config: DetailConfig; captures: Capture[]; onBack: () => void }) {
+  const items = config.type === 'auto'
+    ? captures.filter(c => c.tags.includes(config.tag!))
+    : captures.filter(c => captureMatchesManual(c, config.name));
+
+  return (
+    <View style={ds.container}>
+      <View style={ds.header}>
+        <TouchableOpacity onPress={onBack} style={ds.backBtn} activeOpacity={0.7}>
+          <Ionicons name="arrow-back" size={22} color="#1A202C" />
+        </TouchableOpacity>
+        <Text style={ds.headerEmoji}>{config.emoji}</Text>
+        <View style={{ flex: 1 }}>
+          <Text style={ds.headerTitle}>{config.name}</Text>
+          <Text style={ds.headerSub}>
+            {items.length} {items.length === 1 ? 'item' : 'items'}
+            {config.type === 'manual' ? ' · Manual' : ' · Auto'}
+          </Text>
+        </View>
+      </View>
+
+      <ScrollView contentContainerStyle={ds.list}>
+        {items.length === 0 ? (
+          <View style={ds.empty}>
+            <Text style={ds.emptyEmoji}>{config.emoji}</Text>
+            <Text style={ds.emptyTitle}>Nothing here yet</Text>
+            <Text style={ds.emptyText}>
+              {config.type === 'manual'
+                ? `Save items about "${config.name}" and they'll appear here automatically`
+                : 'Save more items with this tag to see them here'}
+            </Text>
+          </View>
+        ) : (
+          items.map(item => <DetailItem key={item.id} item={item} />)
+        )}
+      </ScrollView>
+    </View>
+  );
+}
+
+// ── Collection card ──────────────────────────────────────────
+
+function CollectionCard({
+  name, emoji, count, thumbnail, colors, showDelete, onPress, onDelete,
+}: {
+  name: string; emoji: string; count: number; thumbnail?: string;
+  colors: [string, string]; showDelete?: boolean;
+  onPress: () => void; onDelete?: () => void;
+}) {
+  return (
+    <TouchableOpacity style={s.cardWrap} activeOpacity={0.85} onPress={onPress}>
+      <LinearGradient colors={colors} style={s.card} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}>
+        {thumbnail ? (
+          <Image source={{ uri: thumbnail }} style={s.cardImage} resizeMode="cover" />
+        ) : (
+          <View style={s.emojiWrap}>
+            <Text style={s.emoji}>{emoji}</Text>
+          </View>
+        )}
+        <View style={s.cardInfo}>
+          <Text style={s.cardName} numberOfLines={1}>{name}</Text>
+          <Text style={s.cardCount}>{count} items</Text>
+        </View>
+      </LinearGradient>
+      {showDelete && onDelete && (
+        <TouchableOpacity
+          style={s.deleteBtn}
+          onPress={e => { e.stopPropagation?.(); onDelete(); }}
+          hitSlop={{ top: 6, right: 6, bottom: 6, left: 6 }}
+        >
+          <Ionicons name="close-circle" size={20} color="#CBD5E0" />
+        </TouchableOpacity>
+      )}
+    </TouchableOpacity>
+  );
+}
+
+// 2-column grid helper
+function CardGrid({ items }: { items: React.ReactNode[] }) {
+  const rows: React.ReactNode[][] = [];
+  for (let i = 0; i < items.length; i += 2) rows.push(items.slice(i, i + 2));
+  return (
+    <View style={s.grid}>
+      {rows.map((row, i) => (
+        <View key={i} style={s.gridRow}>
+          {row[0]}
+          {row[1] ?? <View style={s.cardSpacer} />}
+        </View>
+      ))}
+    </View>
+  );
+}
+
+// ── Create modal ─────────────────────────────────────────────
+
+function CreateModal({ visible, onClose, onSave }: {
+  visible: boolean; onClose: () => void;
+  onSave: (name: string, emoji: string) => Promise<void>;
+}) {
+  const [name, setName]   = useState('');
+  const [emoji, setEmoji] = useState('📁');
+  const [saving, setSaving] = useState(false);
+
+  async function handleSave() {
+    if (!name.trim()) return;
+    setSaving(true);
+    await onSave(name.trim(), emoji);
+    setName('');
+    setEmoji('📁');
+    setSaving(false);
+  }
+
+  return (
+    <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
+      <KeyboardAvoidingView
+        style={m.overlay}
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+      >
+        <TouchableOpacity style={m.backdrop} activeOpacity={1} onPress={onClose} />
+        <View style={m.sheet}>
+          <View style={m.handle} />
+          <Text style={m.sheetTitle}>New Collection</Text>
+
+          {/* Selected emoji preview */}
+          <View style={m.emojiPreview}>
+            <Text style={m.emojiPreviewText}>{emoji}</Text>
+          </View>
+
+          {/* Emoji picker */}
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={m.emojiRow}>
+            {EMOJI_OPTIONS.map(e => (
+              <TouchableOpacity
+                key={e}
+                style={[m.emojiOption, emoji === e && m.emojiSelected]}
+                onPress={() => setEmoji(e)}
+                activeOpacity={0.7}
+              >
+                <Text style={m.emojiOptionText}>{e}</Text>
+              </TouchableOpacity>
+            ))}
+          </ScrollView>
+
+          {/* Name input */}
+          <TextInput
+            style={m.input}
+            placeholder="Collection name…"
+            placeholderTextColor="#A0AEC0"
+            value={name}
+            onChangeText={setName}
+            autoFocus
+            returnKeyType="done"
+            onSubmitEditing={handleSave}
+          />
+
+          {/* Buttons */}
+          <View style={m.btns}>
+            <TouchableOpacity style={m.cancelBtn} onPress={onClose} activeOpacity={0.7}>
+              <Text style={m.cancelText}>Cancel</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[m.saveBtn, (!name.trim() || saving) && m.saveBtnDisabled]}
+              onPress={handleSave}
+              activeOpacity={0.8}
+              disabled={!name.trim() || saving}
+            >
+              {saving
+                ? <ActivityIndicator size="small" color="#fff" />
+                : <Text style={m.saveText}>Create</Text>}
+            </TouchableOpacity>
+          </View>
+        </View>
+      </KeyboardAvoidingView>
+    </Modal>
+  );
+}
+
+// ── Main screen ──────────────────────────────────────────────
+
+interface Props { captures: Capture[] }
+
+export default function CollectionsScreen({ captures }: Props) {
+  const [userCollections, setUserCollections]   = useState<UserCollection[]>([]);
+  const [detail, setDetail]                     = useState<DetailConfig | null>(null);
+  const [showCreate, setShowCreate]             = useState(false);
+
+  const autoCollections = buildAutoCollections(captures);
+
+  useEffect(() => {
+    loadUserCollections().then(setUserCollections);
+  }, []);
+
+  async function handleCreate(name: string, emoji: string) {
+    await createUserCollection(name, emoji);
+    setUserCollections(await loadUserCollections());
+    setShowCreate(false);
+  }
+
+  function handleDelete(id: string) {
+    Alert.alert('Delete Collection', 'Remove this collection? Your saved items won\'t be deleted.', [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Delete', style: 'destructive',
+        onPress: async () => {
+          await deleteUserCollection(id);
+          setUserCollections(prev => prev.filter(c => c.id !== id));
+        },
+      },
+    ]);
+  }
+
+  if (detail) {
+    return <CollectionDetail config={detail} captures={captures} onBack={() => setDetail(null)} />;
+  }
+
+  return (
+    <View style={s.container}>
+      {/* Header */}
+      <View style={s.header}>
+        <View>
+          <Text style={s.title}>Collections</Text>
+          <Text style={s.subtitle}>Organize your saves</Text>
+        </View>
+        <TouchableOpacity style={s.addBtn} onPress={() => setShowCreate(true)} activeOpacity={0.8}>
+          <Ionicons name="add" size={22} color="#fff" />
+        </TouchableOpacity>
+      </View>
+
+      <ScrollView contentContainerStyle={s.scrollContent} showsVerticalScrollIndicator={false}>
+
+        {/* ── My Collections ── */}
+        <View style={s.section}>
+          <Text style={s.sectionLabel}>My Collections</Text>
+
+          {userCollections.length === 0 ? (
+            <TouchableOpacity style={s.createPrompt} onPress={() => setShowCreate(true)} activeOpacity={0.8}>
+              <Ionicons name="add-circle-outline" size={22} color="#5A67D8" />
+              <Text style={s.createPromptText}>Create your first collection</Text>
+            </TouchableOpacity>
+          ) : (
+            <CardGrid items={userCollections.map((col, i) => (
+              <CollectionCard
+                key={col.id}
+                name={col.name}
+                emoji={col.emoji}
+                count={captures.filter(c => captureMatchesManual(c, col.name)).length}
+                colors={GRADIENTS[i % GRADIENTS.length]}
+                showDelete
+                onPress={() => setDetail({ type: 'manual', name: col.name, emoji: col.emoji })}
+                onDelete={() => handleDelete(col.id)}
+              />
+            ))} />
+          )}
+        </View>
+
+        {/* ── Auto Collections ── */}
+        {autoCollections.length > 0 && (
+          <View style={s.section}>
+            <Text style={s.sectionLabel}>Auto Collections</Text>
+            <Text style={s.sectionSub}>Automatically grouped by topic</Text>
+            <CardGrid items={autoCollections.map(col => (
+              <CollectionCard
+                key={col.tag}
+                name={col.name}
+                emoji={col.emoji}
+                count={col.count}
+                thumbnail={col.thumbnail}
+                colors={col.colors}
+                onPress={() => setDetail({ type: 'auto', name: col.name, emoji: col.emoji, tag: col.tag })}
+              />
+            ))} />
+          </View>
+        )}
+
+        {autoCollections.length === 0 && userCollections.length === 0 && (
+          <View style={s.emptyState}>
+            <Text style={s.emptyIcon}>📁</Text>
+            <Text style={s.emptyTitle}>Nothing here yet</Text>
+            <Text style={s.emptyText}>
+              Create a collection above, or save a few items and auto collections will appear
+            </Text>
+          </View>
+        )}
+
+      </ScrollView>
+
+      <CreateModal
+        visible={showCreate}
+        onClose={() => setShowCreate(false)}
+        onSave={handleCreate}
+      />
+    </View>
+  );
+}
+
+// ── Styles ───────────────────────────────────────────────────
+
+const s = StyleSheet.create({
+  container: { flex: 1, backgroundColor: '#FFFFFF' },
+  header: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingTop: Platform.OS === 'ios' ? 60 : 48,
+    paddingHorizontal: 20,
+    paddingBottom: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: '#F0F0F0',
+  },
+  title:    { fontSize: 26, fontWeight: '700', color: '#1A202C' },
+  subtitle: { fontSize: 13, color: '#A0AEC0', marginTop: 1 },
+  addBtn: {
+    width: 38, height: 38, borderRadius: 12,
+    backgroundColor: '#5A67D8',
+    alignItems: 'center', justifyContent: 'center',
+  },
+
+  scrollContent: { paddingBottom: 100 },
+
+  section:      { paddingHorizontal: 16, paddingTop: 24 },
+  sectionLabel: { fontSize: 12, fontWeight: '700', color: '#A0AEC0', textTransform: 'uppercase', letterSpacing: 0.8, marginBottom: 4 },
+  sectionSub:   { fontSize: 12, color: '#CBD5E0', marginBottom: 12 },
+
+  createPrompt: {
+    flexDirection: 'row', alignItems: 'center', gap: 10,
+    backgroundColor: '#F7F8FC', borderRadius: 16,
+    padding: 16, marginTop: 8,
+    borderWidth: 1.5, borderStyle: 'dashed', borderColor: '#C3CCFF',
+  },
+  createPromptText: { fontSize: 14, color: '#5A67D8', fontWeight: '600' },
+
+  grid:       { marginTop: 8 },
+  gridRow:    { flexDirection: 'row', gap: 12, marginBottom: 12 },
+  cardSpacer: { flex: 1 },
+
+  cardWrap: {
+    flex: 1, borderRadius: 20, overflow: 'hidden',
+    shadowColor: '#000', shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.07, shadowRadius: 8, elevation: 3,
+    position: 'relative',
+  },
+  card:      { borderRadius: 20, overflow: 'hidden' },
+  cardImage: { width: '100%', height: 110 },
+  emojiWrap: { width: '100%', height: 110, alignItems: 'center', justifyContent: 'center' },
+  emoji:     { fontSize: 44 },
+  cardInfo:  { padding: 12 },
+  cardName:  { fontSize: 15, fontWeight: '700', color: '#1A202C' },
+  cardCount: { fontSize: 12, color: '#718096', marginTop: 2 },
+  deleteBtn: { position: 'absolute', top: 8, right: 8 },
+
+  emptyState: { alignItems: 'center', paddingTop: 60, paddingHorizontal: 40 },
+  emptyIcon:  { fontSize: 48 },
+  emptyTitle: { fontSize: 18, fontWeight: '600', color: '#2D3748', marginTop: 12 },
+  emptyText:  { fontSize: 14, color: '#A0AEC0', marginTop: 6, textAlign: 'center', lineHeight: 22 },
+});
+
+// Detail styles
+const ds = StyleSheet.create({
+  container: { flex: 1, backgroundColor: '#FFFFFF' },
+  header: {
+    flexDirection: 'row', alignItems: 'center', gap: 12,
+    paddingTop: Platform.OS === 'ios' ? 60 : 48,
+    paddingHorizontal: 20, paddingBottom: 16,
+    borderBottomWidth: 1, borderBottomColor: '#F0F0F0',
+  },
+  backBtn:     { padding: 4 },
+  headerEmoji: { fontSize: 26 },
+  headerTitle: { fontSize: 20, fontWeight: '700', color: '#1A202C' },
+  headerSub:   { fontSize: 12, color: '#A0AEC0', marginTop: 2 },
+  list:        { paddingHorizontal: 14, paddingTop: 8, paddingBottom: 100 },
+  item: {
+    flexDirection: 'row', alignItems: 'center',
+    backgroundColor: '#F7F8FC', borderRadius: 16,
+    padding: 12, marginBottom: 8,
+  },
+  thumb:            { width: 60, height: 60, borderRadius: 12, backgroundColor: '#ECEEF2' },
+  thumbPlaceholder: { backgroundColor: '#EEF2FF', alignItems: 'center', justifyContent: 'center' },
+  thumbInitial:     { fontSize: 20, fontWeight: '700', color: '#5A67D8' },
+  info:    { flex: 1, marginHorizontal: 12 },
+  title:   { fontSize: 14, fontWeight: '600', color: '#1A202C', lineHeight: 19 },
+  summary: { fontSize: 12, color: '#718096', marginTop: 3, lineHeight: 16 },
+  meta:    { flexDirection: 'row', marginTop: 5 },
+  metaText: { fontSize: 11, color: '#A0AEC0' },
+  empty: { alignItems: 'center', paddingTop: 80, paddingHorizontal: 40 },
+  emptyEmoji: { fontSize: 48 },
+  emptyTitle: { fontSize: 18, fontWeight: '600', color: '#2D3748', marginTop: 12 },
+  emptyText:  { fontSize: 14, color: '#A0AEC0', marginTop: 6, textAlign: 'center', lineHeight: 22 },
+});
+
+// Modal styles
+const m = StyleSheet.create({
+  overlay: { flex: 1, justifyContent: 'flex-end' },
+  backdrop: { ...StyleSheet.absoluteFill, backgroundColor: 'rgba(0,0,0,0.4)' },
+  sheet: {
+    backgroundColor: '#fff',
+    borderTopLeftRadius: 28, borderTopRightRadius: 28,
+    padding: 24, paddingBottom: Platform.OS === 'ios' ? 40 : 24,
+  },
+  handle: {
+    width: 36, height: 4, borderRadius: 2,
+    backgroundColor: '#E2E8F0', alignSelf: 'center', marginBottom: 20,
+  },
+  sheetTitle: { fontSize: 20, fontWeight: '700', color: '#1A202C', textAlign: 'center', marginBottom: 20 },
+
+  emojiPreview: {
+    width: 72, height: 72, borderRadius: 20,
+    backgroundColor: '#F7F8FC', alignItems: 'center', justifyContent: 'center',
+    alignSelf: 'center', marginBottom: 16,
+  },
+  emojiPreviewText: { fontSize: 38 },
+
+  emojiRow:       { paddingHorizontal: 4, gap: 8, paddingBottom: 4 },
+  emojiOption:    { width: 44, height: 44, borderRadius: 12, alignItems: 'center', justifyContent: 'center', backgroundColor: '#F7F8FC' },
+  emojiSelected:  { backgroundColor: '#EEF2FF', borderWidth: 2, borderColor: '#5A67D8' },
+  emojiOptionText: { fontSize: 22 },
+
+  input: {
+    backgroundColor: '#F7F8FC', borderRadius: 14,
+    paddingHorizontal: 16, paddingVertical: 14,
+    fontSize: 16, color: '#1A202C',
+    marginTop: 16, marginBottom: 20,
+  },
+
+  btns:      { flexDirection: 'row', gap: 12 },
+  cancelBtn: { flex: 1, paddingVertical: 14, borderRadius: 14, backgroundColor: '#F7F8FC', alignItems: 'center' },
+  cancelText: { fontSize: 15, fontWeight: '600', color: '#718096' },
+  saveBtn:   { flex: 1, paddingVertical: 14, borderRadius: 14, backgroundColor: '#5A67D8', alignItems: 'center' },
+  saveBtnDisabled: { opacity: 0.5 },
+  saveText:  { fontSize: 15, fontWeight: '700', color: '#fff' },
+});

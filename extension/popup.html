@@ -8,36 +8,51 @@
 
   <!-- Login view -->
   <div id="login-view">
-    <div class="logo-area">
-      <span class="logo">📥</span>
-      <span class="app-name">QuickCapture</span>
+    <div class="brand">
+      <span class="brand-icon">📥</span>
+      <span class="brand-name">QuickCapture</span>
     </div>
-    <p class="label">Sign in to save</p>
-    <input type="text" id="email" placeholder="Username" autocomplete="username" autocorrect="off" autocapitalize="off" />
-    <input type="password" id="password" placeholder="Password" autocomplete="current-password" />
-    <p id="auth-error" class="error"></p>
-    <button id="signin-btn" class="btn">Sign In</button>
+    <p class="brand-tagline">Save anything. Find it fast.</p>
+    <div class="form">
+      <input type="email" id="email" placeholder="Email" autocomplete="email" autocapitalize="off" />
+      <input type="password" id="password" placeholder="Password" autocomplete="current-password" />
+      <p id="auth-error" class="error"></p>
+      <button id="signin-btn" class="btn">Sign In</button>
+    </div>
   </div>
 
   <!-- Save view -->
   <div id="save-view" style="display:none">
-    <div class="header">
-      <div class="logo-area">
-        <span class="logo">📥</span>
-        <span class="app-name">QuickCapture</span>
+    <div class="top-bar">
+      <div class="brand-small">
+        <span>📥</span>
+        <span class="brand-name-small">QuickCapture</span>
       </div>
-      <button id="signout-btn" class="signout">Sign out</button>
+      <button id="signout-btn" class="signout-btn">Sign out</button>
     </div>
 
-    <div class="page-info">
-      <p id="page-title" class="page-title"></p>
-      <p id="page-url" class="page-url"></p>
+    <div class="preview-card">
+      <img id="thumbnail" class="thumbnail" style="display:none" />
+      <div class="preview-info">
+        <img id="favicon" class="favicon" style="display:none" />
+        <div class="preview-text">
+          <p id="page-title" class="page-title"></p>
+          <p id="page-domain" class="page-domain"></p>
+        </div>
+      </div>
     </div>
 
-    <textarea id="note" placeholder="Add a note (optional)..."></textarea>
+    <textarea id="note" placeholder="Add a note... (optional)" rows="3"></textarea>
 
-    <button id="save-btn" class="btn">✨ Save to QuickCapture</button>
-    <p id="save-status" class="status"></p>
+    <button id="save-btn" class="btn save-btn">✨ Save to QuickCapture</button>
+    <p id="save-error" class="error" style="text-align:center"></p>
+  </div>
+
+  <!-- Confirmation view -->
+  <div id="confirm-view" style="display:none">
+    <div class="confirm-icon">✓</div>
+    <p class="confirm-title">Saved!</p>
+    <p class="confirm-sub">Added to QuickCapture</p>
   </div>
 
   <script src="config.js"></script>

@@ -1,15 +1,18 @@
 {
   "expo": {
-    "name": "QuickCapture",
-    "slug": "QuickCapture",
+    "name": "Later",
+    "slug": "later",
+    "scheme": "later",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "bundleIdentifier": "com.liamki.quickcapture"
     },
     "android": {
+      "package": "com.liamki.quickcapture",
       "adaptiveIcon": {
         "backgroundColor": "#E6F4FE",
         "foregroundImage": "./assets/android-icon-foreground.png",
@@ -20,6 +23,13 @@
     },
     "web": {
       "favicon": "./assets/favicon.png"
-    }
+    },
+    "plugins": [
+      ["expo-share-intent", {
+        "androidMainActivityAttributes": {
+          "android:launchMode": "singleTask"
+        }
+      }]
+    ]
   }
 }

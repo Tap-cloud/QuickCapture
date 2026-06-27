@@ -22,12 +22,10 @@ export default function AuthScreen() {
   const [confirmPassword, setConfirmPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
-  const [signedUp, setSignedUp] = useState(false);
 
   function switchTab(t: Tab) {
     setTab(t);
     setError('');
-    setSignedUp(false);
     setConfirmPassword('');
   }
 
@@ -64,16 +62,12 @@ export default function AuthScreen() {
       if (err) {
         setError(err.message);
       } else {
-        // Try to sign in immediately — works if email auto-confirm is enabled.
-        // If email confirmation is required, this will fail and we show the check-email screen.
         const { error: signInErr } = await supabase.auth.signInWithPassword({
           email: email.trim(),
           password,
         });
-        if (signInErr) {
-          setSignedUp(true); // Show "check your email" as fallback
-        }
-        // If sign-in succeeds, App.tsx onAuthStateChange navigates to home automatically
+        if (signInErr) setError('Account created! Please sign in.');
+        // On success, onAuthStateChange in App.tsx navigates to home automatically
       }
     } else {
       const { error: err } = await supabase.auth.signInWithPassword({
@@ -98,7 +92,7 @@ export default function AuthScreen() {
       >
         <View style={styles.logoArea}>
           <Text style={styles.logo}>📥</Text>
-          <Text style={styles.appName}>QuickCapture</Text>
+          <Text style={styles.appName}>Later</Text>
           <Text style={styles.tagline}>Save anything. Find it fast.</Text>
         </View>
 
@@ -122,21 +116,7 @@ export default function AuthScreen() {
             </TouchableOpacity>
           </View>
 
-          {signedUp ? (
-            <View style={styles.successBox}>
-              <Text style={styles.successIcon}>📬</Text>
-              <Text style={styles.successTitle}>Check your email</Text>
-              <Text style={styles.successText}>
-                We sent a confirmation link to{' '}
-                <Text style={{ fontWeight: '700' }}>{email.trim()}</Text>.
-                {'\n'}Click it, then come back to sign in.
-              </Text>
-              <TouchableOpacity onPress={() => switchTab('signin')} style={styles.btn}>
-                <Text style={styles.btnText}>Go to Sign In</Text>
-              </TouchableOpacity>
-            </View>
-          ) : (
-            <View style={styles.form}>
+          <View style={styles.form}>
               {tab === 'signup' && (
                 <TextInput
                   style={styles.input}
@@ -194,7 +174,6 @@ export default function AuthScreen() {
                 </TouchableOpacity>
               )}
             </View>
-          )}
         </View>
       </ScrollView>
     </KeyboardAvoidingView>
@@ -202,23 +181,16 @@ export default function AuthScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#F7F8FC' },
+  container: { flex: 1, backgroundColor: '#FFFFFF' },
   inner: { flexGrow: 1, justifyContent: 'center', padding: 24 },
   logoArea: { alignItems: 'center', marginBottom: 32 },
   logo: { fontSize: 56 },
   appName: { fontSize: 28, fontWeight: '700', color: '#1A202C', marginTop: 12 },
   tagline: { fontSize: 14, color: '#718096', marginTop: 4 },
   card: {
-    backgroundColor: '#FFFFFF',
-    borderRadius: 20,
+    backgroundColor: '#F7F8FC',
+    borderRadius: 24,
     overflow: 'hidden',
-    borderWidth: 1,
-    borderColor: '#E2E8F0',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.06,
-    shadowRadius: 8,
-    elevation: 3,
   },
   tabs: {
     flexDirection: 'row',
@@ -240,15 +212,14 @@ const styles = StyleSheet.create({
   tabTextActive: { color: '#5A67D8' },
   form: { padding: 20, paddingTop: 4 },
   input: {
-    backgroundColor: '#F7F8FC',
-    borderWidth: 1,
-    borderColor: '#E2E8F0',
-    borderRadius: 12,
+    backgroundColor: '#FFFFFF',
+    borderWidth: 0,
+    borderRadius: 14,
     paddingHorizontal: 14,
-    paddingVertical: 12,
+    paddingVertical: 13,
     fontSize: 15,
     color: '#1A202C',
-    marginTop: 12,
+    marginTop: 10,
   },
   error: { color: '#E53E3E', fontSize: 13, marginTop: 8 },
   btn: {

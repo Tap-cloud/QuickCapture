@@ -1,2 +1,3 @@
-NEXT_PUBLIC_SUPABASE_URL=https://wykdhueokgkyfvjgidbj.supabase.co
-NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=sb_publishable_Jozvh0Ri35RMrYxN9p2R9Q_93Y3GB3V
+export const SUPABASE_URL = process.env.EXPO_PUBLIC_SUPABASE_URL ?? '';
+export const SUPABASE_ANON_KEY = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY ?? '';
+export const CLAUDE_API_KEY = process.env.EXPO_PUBLIC_CLAUDE_API_KEY ?? '';
