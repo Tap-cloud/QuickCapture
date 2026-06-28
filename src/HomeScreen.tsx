@@ -1,29 +1,23 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import {
   View, Text, TextInput, SectionList, TouchableOpacity,
-  Alert, StyleSheet, Platform, ActivityIndicator, Image, Linking,
+  Alert, StyleSheet, Platform, Image, Linking, Modal,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { Session } from '@supabase/supabase-js';
-import { Capture, removeCapture } from './storage';
-import { expandSearchQuery } from './tagger';
+import { Capture, removeCapture, updateCapture } from './storage';
+import { scoreCapture, SCORE_THRESHOLD } from './tagger';
+import { useTheme } from './theme';
 import WebHomeScreen from './WebHomeScreen';
 
-interface Props {
-  captures: Capture[];
-  session: Session;
-  onRefresh: () => void;
-}
+interface Props { captures: Capture[]; session: Session; onRefresh: () => void }
 
-interface Section {
-  title: string;
-  data: Capture[];
-}
+interface Section { title: string; data: Capture[] }
 
 function getGreeting(username: string): string {
-  const hour = new Date().getHours();
-  const time = hour < 12 ? 'morning' : hour < 17 ? 'afternoon' : 'evening';
-  return `Good ${time}, ${username} 👋`;
+  const h = new Date().getHours();
+  const t = h < 12 ? 'morning' : h < 17 ? 'afternoon' : 'evening';
+  return `Good ${t}, ${username} 👋`;
 }
 
 function getDomain(url?: string): string {
@@ -31,9 +25,9 @@ function getDomain(url?: string): string {
   try { return new URL(url).hostname.replace('www.', ''); } catch { return ''; }
 }
 
-function getContentType(capture: Capture): string {
-  const url = (capture.url ?? '').toLowerCase();
-  const tags = capture.tags.map(t => t.toLowerCase());
+function getContentType(c: Capture): string {
+  const url  = (c.url ?? '').toLowerCase();
+  const tags = c.tags.map(t => t.toLowerCase());
   if (url.includes('youtube.com') || url.includes('youtu.be') || tags.includes('video')) return 'Video';
   if (tags.includes('pdf') || url.endsWith('.pdf')) return 'PDF';
   if (tags.includes('recipe')) return 'Recipe';
@@ -43,151 +37,145 @@ function getContentType(capture: Capture): string {
 
 function getTypeIcon(type: string): keyof typeof Ionicons.glyphMap {
   switch (type) {
-    case 'Video': return 'play-circle-outline';
-    case 'PDF': return 'document-outline';
-    case 'Recipe': return 'restaurant-outline';
+    case 'Video':   return 'play-circle-outline';
+    case 'PDF':     return 'document-outline';
+    case 'Recipe':  return 'restaurant-outline';
     case 'Article': return 'newspaper-outline';
-    default: return 'link-outline';
+    default:        return 'link-outline';
   }
 }
 
-function formatDate(dateString: string): string {
-  const diff = Date.now() - new Date(dateString).getTime();
-  const mins = Math.floor(diff / 60000);
-  if (mins < 1) return 'Just now';
+function formatDate(d: string): string {
+  const mins = Math.floor((Date.now() - new Date(d).getTime()) / 60000);
+  if (mins < 1)  return 'Just now';
   if (mins < 60) return `${mins}m ago`;
-  const hours = Math.floor(mins / 60);
-  if (hours < 24) return `${hours}h ago`;
-  const days = Math.floor(hours / 24);
-  return `${days}d ago`;
+  const h = Math.floor(mins / 60);
+  if (h < 24)    return `${h}h ago`;
+  return `${Math.floor(h / 24)}d ago`;
 }
 
 function groupCaptures(captures: Capture[]): Section[] {
-  const now = Date.now();
-  const todayStart = new Date(new Date().setHours(0, 0, 0, 0)).getTime();
+  const todayStart     = new Date(new Date().setHours(0, 0, 0, 0)).getTime();
   const yesterdayStart = todayStart - 86400000;
-  const weekStart = todayStart - 7 * 86400000;
-
-  const groups: Record<string, Capture[]> = {
-    Today: [], Yesterday: [], 'This Week': [], Older: [],
-  };
-
+  const weekStart      = todayStart - 7 * 86400000;
+  const groups: Record<string, Capture[]> = { Today: [], Yesterday: [], 'This Week': [], Older: [] };
   for (const c of captures) {
     const t = new Date(c.created_at).getTime();
-    if (t >= todayStart) groups['Today'].push(c);
+    if      (t >= todayStart)     groups['Today'].push(c);
     else if (t >= yesterdayStart) groups['Yesterday'].push(c);
-    else if (t >= weekStart) groups['This Week'].push(c);
-    else groups['Older'].push(c);
+    else if (t >= weekStart)      groups['This Week'].push(c);
+    else                          groups['Older'].push(c);
   }
-
-  return Object.entries(groups)
-    .filter(([, data]) => data.length > 0)
-    .map(([title, data]) => ({ title, data }));
+  return Object.entries(groups).filter(([, d]) => d.length > 0).map(([title, data]) => ({ title, data }));
 }
 
-function CaptureItem({ item, onDelete }: { item: Capture; onDelete: (id: string) => void }) {
-  const type = getContentType(item);
+function CaptureItem({ item, onEdit, onDelete }: { item: Capture; onEdit: (item: Capture) => void; onDelete: (id: string) => void }) {
+  const { colors } = useTheme();
+  const s = useMemo(() => makeStyles(colors), [colors]);
+  const type   = getContentType(item);
   const domain = getDomain(item.url);
 
+  function showOptions() {
+    Alert.alert('Options', undefined, [
+      { text: 'Edit', onPress: () => onEdit(item) },
+      { text: 'Delete', style: 'destructive', onPress: () => onDelete(item.id) },
+      { text: 'Cancel', style: 'cancel' },
+    ]);
+  }
+
   return (
-    <TouchableOpacity
-      style={styles.item}
-      onPress={() => item.url ? Linking.openURL(item.url) : null}
-      activeOpacity={item.url ? 0.7 : 1}
-    >
+    <TouchableOpacity style={s.item} onPress={() => item.url ? Linking.openURL(item.url) : null} activeOpacity={item.url ? 0.7 : 1}>
       {item.thumbnail_url ? (
-        <Image
-          source={{ uri: item.thumbnail_url }}
-          style={styles.thumb}
-          resizeMode="cover"
-          onError={() => {}}
-        />
+        <Image source={{ uri: item.thumbnail_url }} style={s.thumb} resizeMode="cover" onError={() => {}} />
       ) : (
-        <View style={styles.thumbPlaceholder}>
-          {item.site_name ? (
-            <Text style={styles.thumbInitial}>
-              {item.site_name.charAt(0).toUpperCase()}
-            </Text>
-          ) : (
-            <Ionicons name={getTypeIcon(type)} size={26} color="#A0AEC0" />
-          )}
+        <View style={s.thumbPlaceholder}>
+          {item.site_name
+            ? <Text style={s.thumbInitial}>{item.site_name.charAt(0).toUpperCase()}</Text>
+            : <Ionicons name={getTypeIcon(type)} size={26} color={colors.textMuted} />}
         </View>
       )}
-
-      <View style={styles.itemContent}>
-        <Text style={styles.itemTitle} numberOfLines={2}>
-          {item.title || item.content}
-        </Text>
-        {item.summary ? (
-          <Text style={styles.itemSummary} numberOfLines={2}>{item.summary}</Text>
-        ) : null}
-        <View style={styles.itemMeta}>
-          {(item.site_name || domain) ? <Text style={styles.metaText}>{item.site_name || domain} · </Text> : null}
-          {item.category ? <Text style={styles.metaCategory}>{item.category} · </Text> : <Text style={styles.metaText}>{type} · </Text>}
-          <Text style={styles.metaText}>{formatDate(item.created_at)}</Text>
+      <View style={s.itemContent}>
+        <Text style={s.itemTitle} numberOfLines={2}>{item.title || item.content}</Text>
+        {item.summary ? <Text style={s.itemSummary} numberOfLines={2}>{item.summary}</Text> : null}
+        <View style={s.itemMeta}>
+          {(item.site_name || domain) ? <Text style={s.metaText}>{item.site_name || domain} · </Text> : null}
+          {item.category ? <Text style={s.metaCategory}>{item.category} · </Text> : <Text style={s.metaText}>{type} · </Text>}
+          <Text style={s.metaText}>{formatDate(item.created_at)}</Text>
         </View>
       </View>
-
-      <TouchableOpacity
-        onPress={() => onDelete(item.id)}
-        hitSlop={{ top: 12, right: 12, bottom: 12, left: 12 }}
-        style={styles.moreBtn}
-      >
-        <Ionicons name="ellipsis-vertical" size={16} color="#CBD5E0" />
+      <TouchableOpacity onPress={showOptions} hitSlop={{ top: 12, right: 12, bottom: 12, left: 12 }} style={s.moreBtn}>
+        <Ionicons name="ellipsis-vertical" size={16} color={colors.textMuted} />
       </TouchableOpacity>
     </TouchableOpacity>
   );
 }
 
+function EditModal({ item, onSave, onClose }: { item: Capture; onSave: (id: string, title: string, note: string) => void; onClose: () => void }) {
+  const { colors } = useTheme();
+  const s = useMemo(() => makeStyles(colors), [colors]);
+  const [title, setTitle] = useState(item.title ?? '');
+  const [note, setNote]   = useState(item.content ?? '');
+
+  return (
+    <Modal visible animationType="slide" transparent onRequestClose={onClose}>
+      <View style={s.modalOverlay}>
+        <View style={s.modalCard}>
+          <Text style={s.modalHeading}>Edit</Text>
+
+          <Text style={s.modalLabel}>Title</Text>
+          <TextInput
+            style={s.modalInput} value={title} onChangeText={setTitle}
+            placeholder="Title" placeholderTextColor={colors.textMuted}
+          />
+
+          <Text style={s.modalLabel}>Your note</Text>
+          <TextInput
+            style={[s.modalInput, { minHeight: 90, textAlignVertical: 'top' }]}
+            value={note} onChangeText={setNote} multiline
+            placeholder="Add a note…" placeholderTextColor={colors.textMuted}
+          />
+
+          <View style={s.modalBtns}>
+            <TouchableOpacity style={s.modalCancel} onPress={onClose}>
+              <Text style={s.modalCancelText}>Cancel</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={s.modalSave} onPress={() => onSave(item.id, title, note)}>
+              <Text style={s.modalSaveText}>Save</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </View>
+    </Modal>
+  );
+}
+
 export default function HomeScreen(props: Props) {
-  if (Platform.OS === 'web') {
-    return <WebHomeScreen {...props} />;
-  }
+  if (Platform.OS === 'web') return <WebHomeScreen {...props} />;
   return <MobileHomeScreen {...props} />;
 }
 
 function MobileHomeScreen({ captures, session, onRefresh }: Props) {
-  const [search, setSearch] = useState('');
-  const [expandedTerms, setExpandedTerms] = useState<string[]>([]);
-  const [searching, setSearching] = useState(false);
+  const { colors } = useTheme();
+  const s = useMemo(() => makeStyles(colors), [colors]);
+
+  const [search, setSearch]       = useState('');
+  const [editTarget, setEditTarget] = useState<Capture | null>(null);
 
   const username = session.user.user_metadata?.username ?? session.user.email?.split('@')[0] ?? 'there';
-  const greeting = getGreeting(username);
 
-  useEffect(() => {
+  const { filtered, sections } = useMemo(() => {
     const q = search.trim().toLowerCase();
-    if (!q) { setExpandedTerms([]); setSearching(false); return; }
-    setExpandedTerms([q]);
-    setSearching(true);
-    const timer = setTimeout(async () => {
-      const terms = await expandSearchQuery(q);
-      setExpandedTerms(terms);
-      setSearching(false);
-    }, 400);
-    return () => clearTimeout(timer);
-  }, [search]);
-
-  const filtered = captures.filter(c => {
-    if (!search.trim()) return true;
-    const q = search.toLowerCase().trim();
-    const terms = expandedTerms.length > 0 ? expandedTerms : [q];
-
-    // Bidirectional tag match — "cheese" finds "grilled-cheese", "recipe" finds "recipes"
-    const tagMatch = c.tags.some(tag =>
-      terms.some(term => tag.includes(term) || term.includes(tag))
-    );
-
-    // Search across every text field using all expanded terms
-    const allText = [c.title, c.content, c.summary, c.description, c.category, c.site_name]
-      .filter(Boolean)
-      .join(' ')
-      .toLowerCase();
-    const textMatch = terms.some(term => allText.includes(term));
-
-    return tagMatch || textMatch;
-  });
-
-  const sections = groupCaptures(filtered);
+    if (!q) return { filtered: captures, sections: groupCaptures(captures) };
+    const scored = captures
+      .map(c => ({ c, score: scoreCapture(c, q) }))
+      .filter(({ score }) => score > 0)
+      .sort((a, b) => b.score - a.score);
+    if (scored.length === 0) return { filtered: [], sections: [{ title: 'Results', data: [] }] };
+    const maxScore  = scored[0].score;
+    const cutoff    = Math.max(SCORE_THRESHOLD, maxScore * 0.4);
+    const list      = scored.filter(({ score }) => score >= cutoff).map(({ c }) => c);
+    return { filtered: list, sections: [{ title: 'Results', data: list }] };
+  }, [captures, search]);
 
   function confirmDelete(id: string) {
     Alert.alert('Delete', 'Remove this capture?', [
@@ -196,45 +184,49 @@ function MobileHomeScreen({ captures, session, onRefresh }: Props) {
     ]);
   }
 
+  async function handleSaveEdit(id: string, title: string, note: string) {
+    await updateCapture(id, { title: title.trim() || undefined, content: note.trim() });
+    setEditTarget(null);
+    onRefresh();
+  }
+
   return (
-    <View style={styles.container}>
+    <View style={s.container}>
+      {editTarget && (
+        <EditModal
+          item={editTarget}
+          onSave={handleSaveEdit}
+          onClose={() => setEditTarget(null)}
+        />
+      )}
       <SectionList
         sections={sections}
         keyExtractor={item => item.id}
         stickySectionHeadersEnabled={false}
-        contentContainerStyle={filtered.length === 0 && !search ? styles.emptyContainer : styles.listContent}
+        contentContainerStyle={filtered.length === 0 && !search ? s.emptyContainer : s.listContent}
         ListHeaderComponent={
-          <View style={styles.header}>
-            <Text style={styles.greeting}>{greeting}</Text>
-            <View style={styles.searchBar}>
-              <Ionicons name="search" size={18} color="#A0AEC0" style={styles.searchIcon} />
+          <View style={s.header}>
+            <Text style={s.greeting}>{getGreeting(username)}</Text>
+            <View style={s.searchBar}>
+              <Ionicons name="search" size={18} color={colors.textMuted} style={s.searchIcon} />
               <TextInput
-                style={styles.searchInput}
+                style={s.searchInput}
                 placeholder='Search... "ramen recipe", "japan trip"'
-                placeholderTextColor="#A0AEC0"
-                value={search}
-                onChangeText={setSearch}
-                clearButtonMode="while-editing"
+                placeholderTextColor={colors.textMuted}
+                value={search} onChangeText={setSearch} clearButtonMode="while-editing"
               />
-              {searching && <ActivityIndicator size="small" color="#A0AEC0" />}
             </View>
           </View>
         }
         renderSectionHeader={({ section }) => (
-          <Text style={styles.sectionHeader}>{section.title}</Text>
+          <Text style={s.sectionHeader}>{section.title}</Text>
         )}
-        renderItem={({ item }) => (
-          <CaptureItem item={item} onDelete={confirmDelete} />
-        )}
+        renderItem={({ item }) => <CaptureItem item={item} onEdit={setEditTarget} onDelete={confirmDelete} />}
         ListEmptyComponent={
-          <View style={styles.empty}>
-            <Text style={styles.emptyIcon}>📥</Text>
-            <Text style={styles.emptyTitle}>
-              {search.trim() ? 'No matches found' : 'Nothing saved yet'}
-            </Text>
-            <Text style={styles.emptyText}>
-              {search.trim() ? 'Try a different keyword or tag' : 'Tap + to capture your first note'}
-            </Text>
+          <View style={s.empty}>
+            <Text style={s.emptyIcon}>📥</Text>
+            <Text style={s.emptyTitle}>{search.trim() ? 'No matches found' : 'Nothing saved yet'}</Text>
+            <Text style={s.emptyText}>{search.trim() ? 'Try a different keyword or tag' : 'Tap + to capture your first note'}</Text>
           </View>
         }
       />
@@ -242,78 +234,56 @@ function MobileHomeScreen({ captures, session, onRefresh }: Props) {
   );
 }
 
-const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#FFFFFF' },
-  listContent: { paddingBottom: 20 },
-  emptyContainer: { flexGrow: 1 },
-  header: {
-    backgroundColor: '#FFFFFF',
-    paddingTop: Platform.OS === 'ios' ? 60 : 48,
-    paddingHorizontal: 20,
-    paddingBottom: 16,
-    borderBottomWidth: 1,
-    borderBottomColor: '#F0F0F0',
-  },
-  greeting: { fontSize: 22, fontWeight: '700', color: '#1A202C', marginBottom: 14 },
-  searchBar: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#F7F8FC',
-    borderRadius: 16,
-    borderWidth: 0,
-    paddingHorizontal: 14,
-    paddingVertical: 11,
-  },
-  searchIcon: { marginRight: 8 },
-  searchInput: { flex: 1, fontSize: 15, color: '#1A202C' },
-  sectionHeader: {
-    fontSize: 12,
-    fontWeight: '700',
-    color: '#C0C8D8',
-    textTransform: 'uppercase',
-    letterSpacing: 1,
-    paddingHorizontal: 20,
-    paddingTop: 22,
-    paddingBottom: 8,
-    backgroundColor: '#FFFFFF',
-  },
-  item: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#F7F8FC',
-    marginHorizontal: 14,
-    marginBottom: 8,
-    borderRadius: 18,
-    padding: 12,
-  },
-  thumb: {
-    width: 62,
-    height: 62,
-    borderRadius: 14,
-    backgroundColor: '#ECEEF2',
-  },
-  thumbPlaceholder: {
-    width: 62,
-    height: 62,
-    borderRadius: 14,
-    backgroundColor: '#EEF2FF',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  thumbInitial: {
-    fontSize: 22,
-    fontWeight: '700',
-    color: '#5A67D8',
-  },
-  itemContent: { flex: 1, marginHorizontal: 12 },
-  itemTitle: { fontSize: 15, fontWeight: '600', color: '#1A202C', lineHeight: 20 },
-  itemSummary: { fontSize: 12, color: '#718096', lineHeight: 17, marginTop: 3 },
-  itemMeta: { flexDirection: 'row', flexWrap: 'wrap', marginTop: 5 },
-  metaText: { fontSize: 12, color: '#A0AEC0' },
-  metaCategory: { fontSize: 12, color: '#5A67D8', fontWeight: '600' },
-  moreBtn: { padding: 4 },
-  empty: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingTop: 100 },
-  emptyIcon: { fontSize: 48 },
-  emptyTitle: { fontSize: 18, fontWeight: '600', color: '#2D3748', marginTop: 12 },
-  emptyText: { fontSize: 14, color: '#A0AEC0', marginTop: 6, textAlign: 'center' },
-});
+function makeStyles(c: ReturnType<typeof useTheme>['colors']) {
+  return StyleSheet.create({
+    container:      { flex: 1, backgroundColor: c.bg },
+    listContent:    { paddingBottom: 20 },
+    emptyContainer: { flexGrow: 1 },
+    header: {
+      backgroundColor: c.bg,
+      paddingTop: Platform.OS === 'ios' ? 60 : 48,
+      paddingHorizontal: 20, paddingBottom: 16,
+      borderBottomWidth: 1, borderBottomColor: c.border,
+    },
+    greeting:    { fontSize: 22, fontWeight: '700', color: c.text, marginBottom: 14 },
+    searchBar:   { flexDirection: 'row', alignItems: 'center', backgroundColor: c.bgSoft, borderRadius: 16, paddingHorizontal: 14, paddingVertical: 11 },
+    searchIcon:  { marginRight: 8 },
+    searchInput: { flex: 1, fontSize: 15, color: c.text },
+    sectionHeader: {
+      fontSize: 12, fontWeight: '700', color: c.sectionHead,
+      textTransform: 'uppercase', letterSpacing: 1,
+      paddingHorizontal: 20, paddingTop: 22, paddingBottom: 8,
+      backgroundColor: c.bg,
+    },
+    item: {
+      flexDirection: 'row', alignItems: 'center',
+      backgroundColor: c.bgSoft,
+      marginHorizontal: 14, marginBottom: 8, borderRadius: 18, padding: 12,
+    },
+    thumb:            { width: 62, height: 62, borderRadius: 14, backgroundColor: c.border },
+    thumbPlaceholder: { width: 62, height: 62, borderRadius: 14, backgroundColor: c.primaryBg, alignItems: 'center', justifyContent: 'center' },
+    thumbInitial:     { fontSize: 22, fontWeight: '700', color: c.primary },
+    itemContent:      { flex: 1, marginHorizontal: 12 },
+    itemTitle:        { fontSize: 15, fontWeight: '600', color: c.text, lineHeight: 20 },
+    itemSummary:      { fontSize: 12, color: c.textSub, lineHeight: 17, marginTop: 3 },
+    itemMeta:         { flexDirection: 'row', flexWrap: 'wrap', marginTop: 5 },
+    metaText:         { fontSize: 12, color: c.textMuted },
+    metaCategory:     { fontSize: 12, color: c.primary, fontWeight: '600' },
+    moreBtn:          { padding: 4 },
+    empty:     { flex: 1, alignItems: 'center', justifyContent: 'center', paddingTop: 100 },
+    emptyIcon:  { fontSize: 48 },
+    emptyTitle: { fontSize: 18, fontWeight: '600', color: c.text, marginTop: 12 },
+    emptyText:  { fontSize: 14, color: c.textMuted, marginTop: 6, textAlign: 'center' },
+
+    modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.45)', justifyContent: 'flex-end' },
+    modalCard:    { backgroundColor: c.bg, borderTopLeftRadius: 24, borderTopRightRadius: 24, padding: 24, paddingBottom: 40 },
+    modalHeading: { fontSize: 18, fontWeight: '700', color: c.text, marginBottom: 20 },
+    modalLabel:   { fontSize: 13, fontWeight: '600', color: c.textSub, marginBottom: 6 },
+    modalInput:   { backgroundColor: c.bgSoft, borderRadius: 14, padding: 14, fontSize: 15, color: c.text, marginBottom: 16 },
+    modalBtns:    { flexDirection: 'row', gap: 10, marginTop: 4 },
+    modalCancel:  { flex: 1, paddingVertical: 14, borderRadius: 14, borderWidth: 1, borderColor: c.border, alignItems: 'center' },
+    modalCancelText: { fontSize: 15, fontWeight: '600', color: c.textSub },
+    modalSave:    { flex: 1, paddingVertical: 14, borderRadius: 14, backgroundColor: c.primary, alignItems: 'center' },
+    modalSaveText: { fontSize: 15, fontWeight: '700', color: '#fff' },
+  });
+}

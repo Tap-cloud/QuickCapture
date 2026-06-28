@@ -1,79 +1,63 @@
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import {
-  View,
-  Text,
-  TextInput,
-  TouchableOpacity,
-  ActivityIndicator,
-  StyleSheet,
-  KeyboardAvoidingView,
-  Platform,
-  ScrollView,
+  View, Text, TextInput, TouchableOpacity, ActivityIndicator,
+  StyleSheet, KeyboardAvoidingView, Platform, ScrollView,
 } from 'react-native';
+import { LinearGradient } from 'expo-linear-gradient';
+import { Ionicons } from '@expo/vector-icons';
 import { supabase } from './supabase';
+import { useTheme } from './theme';
 
 type Tab = 'signin' | 'signup';
 
+const OCEAN: [string, string, string] = ['#0B1D35', '#0E4166', '#0B7A75'];
+
 export default function AuthScreen() {
-  const [tab, setTab] = useState<Tab>('signin');
-  const [username, setUsername] = useState('');
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
+  const { colors } = useTheme();
+  const s = useMemo(() => makeStyles(colors), [colors]);
+
+  const [tab, setTab]                         = useState<Tab>('signin');
+  const [username, setUsername]               = useState('');
+  const [email, setEmail]                     = useState('');
+  const [password, setPassword]               = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState('');
+  const [loading, setLoading]                 = useState(false);
+  const [error, setError]                     = useState('');
 
-  function switchTab(t: Tab) {
-    setTab(t);
-    setError('');
-    setConfirmPassword('');
-  }
-
-  function clearError() {
-    setError('');
-  }
+  function switchTab(t: Tab) { setTab(t); setError(''); setConfirmPassword(''); }
 
   async function handleSubmit() {
     if (tab === 'signup') {
       if (!username.trim() || !email.trim() || !password.trim() || !confirmPassword.trim()) {
-        setError('Please fill in all fields.');
-        return;
+        setError('Please fill in all fields.'); return;
       }
-      if (password !== confirmPassword) {
-        setError('Passwords do not match.');
-        return;
-      }
+      if (password !== confirmPassword) { setError('Passwords do not match.'); return; }
     } else {
-      if (!email.trim() || !password.trim()) {
-        setError('Please enter your email and password.');
-        return;
-      }
+      if (!email.trim() || !password.trim()) { setError('Please enter your email and password.'); return; }
     }
 
-    setLoading(true);
-    setError('');
+    setLoading(true); setError('');
 
     if (tab === 'signup') {
-      const { error: err } = await supabase.auth.signUp({
-        email: email.trim(),
-        password,
+      const { data: signUpData, error: err } = await supabase.auth.signUp({
+        email: email.trim(), password,
         options: { data: { username: username.trim() } },
       });
       if (err) {
-        setError(err.message);
+        const msg = err.message.toLowerCase();
+        if (msg.includes('already registered') || msg.includes('already exists') || msg.includes('already in use')) {
+          setError('An account with this email already exists. Please sign in instead.');
+        } else {
+          setError(err.message);
+        }
+      } else if (signUpData.user?.identities?.length === 0) {
+        setError('An account with this email already exists. Please sign in instead.');
       } else {
-        const { error: signInErr } = await supabase.auth.signInWithPassword({
-          email: email.trim(),
-          password,
-        });
+        const { error: signInErr } = await supabase.auth.signInWithPassword({ email: email.trim(), password });
         if (signInErr) setError('Account created! Please sign in.');
-        // On success, onAuthStateChange in App.tsx navigates to home automatically
       }
     } else {
-      const { error: err } = await supabase.auth.signInWithPassword({
-        email: email.trim(),
-        password,
-      });
+      const { error: err } = await supabase.auth.signInWithPassword({ email: email.trim(), password });
       if (err) setError('Incorrect email or password.');
     }
 
@@ -81,168 +65,200 @@ export default function AuthScreen() {
   }
 
   return (
-    <KeyboardAvoidingView
-      style={{ flex: 1 }}
-      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-    >
-      <ScrollView
-        style={styles.container}
-        contentContainerStyle={styles.inner}
-        keyboardShouldPersistTaps="handled"
-      >
-        <View style={styles.logoArea}>
-          <Text style={styles.logo}>📥</Text>
-          <Text style={styles.appName}>Later</Text>
-          <Text style={styles.tagline}>Save anything. Find it fast.</Text>
-        </View>
+    <LinearGradient colors={OCEAN} style={s.gradient} start={{ x: 0.2, y: 0 }} end={{ x: 0.8, y: 1 }}>
+      {/* Decorative circles */}
+      <View style={s.circleTopLeft} />
+      <View style={s.circleBottomRight} />
 
-        <View style={styles.card}>
-          <View style={styles.tabs}>
-            <TouchableOpacity
-              style={[styles.tab, tab === 'signin' && styles.tabActive]}
-              onPress={() => switchTab('signin')}
-            >
-              <Text style={[styles.tabText, tab === 'signin' && styles.tabTextActive]}>
-                Sign In
-              </Text>
+      <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
+        <ScrollView
+          contentContainerStyle={s.scroll}
+          keyboardShouldPersistTaps="handled"
+          showsVerticalScrollIndicator={false}
+        >
+          {/* ── Logo / wordmark ── */}
+          <View style={s.logoArea}>
+            <View style={s.iconRing}>
+              <Ionicons name="water" size={26} color="#57C9C4" />
+            </View>
+
+            <Text style={s.wordmark}>Cove</Text>
+            <View style={s.wordmarkUnderline} />
+            <Text style={s.tagline}>Your personal corner of the internet</Text>
+          </View>
+
+          {/* ── Form card ── */}
+          <View style={s.card}>
+            {/* Tabs */}
+            <View style={s.tabs}>
+              <TouchableOpacity style={[s.tab, tab === 'signin' && s.tabActive]} onPress={() => switchTab('signin')}>
+                <Text style={[s.tabText, tab === 'signin' && s.tabTextActive]}>Sign In</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={[s.tab, tab === 'signup' && s.tabActive]} onPress={() => switchTab('signup')}>
+                <Text style={[s.tabText, tab === 'signup' && s.tabTextActive]}>Create Account</Text>
+              </TouchableOpacity>
+            </View>
+
+            {tab === 'signup' && (
+              <View style={s.inputWrap}>
+                <Ionicons name="person-outline" size={16} color="#94A3B8" style={s.inputIcon} />
+                <TextInput
+                  style={s.input} placeholder="Username" placeholderTextColor="#94A3B8"
+                  value={username} onChangeText={t => { setUsername(t); setError(''); }}
+                  autoCapitalize="none" autoCorrect={false}
+                />
+              </View>
+            )}
+
+            <View style={s.inputWrap}>
+              <Ionicons name="mail-outline" size={16} color="#94A3B8" style={s.inputIcon} />
+              <TextInput
+                style={s.input} placeholder="Email" placeholderTextColor="#94A3B8"
+                value={email} onChangeText={t => { setEmail(t); setError(''); }}
+                autoCapitalize="none" keyboardType="email-address" autoCorrect={false}
+              />
+            </View>
+
+            <View style={s.inputWrap}>
+              <Ionicons name="lock-closed-outline" size={16} color="#94A3B8" style={s.inputIcon} />
+              <TextInput
+                style={s.input} placeholder="Password" placeholderTextColor="#94A3B8"
+                value={password} onChangeText={t => { setPassword(t); setError(''); }}
+                secureTextEntry returnKeyType="go" onSubmitEditing={handleSubmit}
+              />
+            </View>
+
+            {tab === 'signup' && (
+              <View style={s.inputWrap}>
+                <Ionicons name="lock-closed-outline" size={16} color="#94A3B8" style={s.inputIcon} />
+                <TextInput
+                  style={s.input} placeholder="Confirm Password" placeholderTextColor="#94A3B8"
+                  value={confirmPassword} onChangeText={t => { setConfirmPassword(t); setError(''); }}
+                  secureTextEntry returnKeyType="go" onSubmitEditing={handleSubmit}
+                />
+              </View>
+            )}
+
+            {error ? <Text style={s.error}>{error}</Text> : null}
+
+            <TouchableOpacity style={s.submitBtn} onPress={handleSubmit} disabled={loading} activeOpacity={0.85}>
+              {loading
+                ? <ActivityIndicator color="#fff" />
+                : <Text style={s.submitText}>{tab === 'signin' ? 'Sign In' : 'Create Account'}</Text>}
             </TouchableOpacity>
-            <TouchableOpacity
-              style={[styles.tab, tab === 'signup' && styles.tabActive]}
-              onPress={() => switchTab('signup')}
-            >
-              <Text style={[styles.tabText, tab === 'signup' && styles.tabTextActive]}>
-                Create Account
+
+            <TouchableOpacity onPress={() => switchTab(tab === 'signin' ? 'signup' : 'signin')} activeOpacity={0.7}>
+              <Text style={s.switchText}>
+                {tab === 'signin' ? "Don't have an account? " : 'Already have an account? '}
+                <Text style={s.switchLink}>{tab === 'signin' ? 'Sign up' : 'Sign in'}</Text>
               </Text>
             </TouchableOpacity>
           </View>
-
-          <View style={styles.form}>
-              {tab === 'signup' && (
-                <TextInput
-                  style={styles.input}
-                  placeholder="Username"
-                  placeholderTextColor="#A0AEC0"
-                  value={username}
-                  onChangeText={t => { setUsername(t); clearError(); }}
-                  autoCapitalize="none"
-                  autoCorrect={false}
-                  autoComplete="username"
-                />
-              )}
-              <TextInput
-                style={styles.input}
-                placeholder="Email"
-                placeholderTextColor="#A0AEC0"
-                value={email}
-                onChangeText={t => { setEmail(t); clearError(); }}
-                keyboardType="email-address"
-                autoCapitalize="none"
-                autoComplete="email"
-              />
-              <TextInput
-                style={styles.input}
-                placeholder="Password"
-                placeholderTextColor="#A0AEC0"
-                value={password}
-                onChangeText={t => { setPassword(t); clearError(); }}
-                secureTextEntry
-                autoComplete={tab === 'signup' ? 'new-password' : 'current-password'}
-                onSubmitEditing={tab === 'signup' ? undefined : handleSubmit}
-              />
-              {tab === 'signup' && (
-                <TextInput
-                  style={styles.input}
-                  placeholder="Confirm Password"
-                  placeholderTextColor="#A0AEC0"
-                  value={confirmPassword}
-                  onChangeText={t => { setConfirmPassword(t); clearError(); }}
-                  secureTextEntry
-                  autoComplete="new-password"
-                  onSubmitEditing={handleSubmit}
-                />
-              )}
-
-              {error ? <Text style={styles.error}>{error}</Text> : null}
-
-              {loading ? (
-                <ActivityIndicator color="#5A67D8" style={{ marginVertical: 20 }} />
-              ) : (
-                <TouchableOpacity style={styles.btn} onPress={handleSubmit} activeOpacity={0.85}>
-                  <Text style={styles.btnText}>
-                    {tab === 'signin' ? 'Sign In' : 'Create Account'}
-                  </Text>
-                </TouchableOpacity>
-              )}
-            </View>
-        </View>
-      </ScrollView>
-    </KeyboardAvoidingView>
+        </ScrollView>
+      </KeyboardAvoidingView>
+    </LinearGradient>
   );
 }
 
-const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#FFFFFF' },
-  inner: { flexGrow: 1, justifyContent: 'center', padding: 24 },
-  logoArea: { alignItems: 'center', marginBottom: 32 },
-  logo: { fontSize: 56 },
-  appName: { fontSize: 28, fontWeight: '700', color: '#1A202C', marginTop: 12 },
-  tagline: { fontSize: 14, color: '#718096', marginTop: 4 },
-  card: {
-    backgroundColor: '#F7F8FC',
-    borderRadius: 24,
-    overflow: 'hidden',
-  },
-  tabs: {
-    flexDirection: 'row',
-    borderBottomWidth: 1,
-    borderBottomColor: '#E2E8F0',
-  },
-  tab: {
-    flex: 1,
-    paddingVertical: 14,
-    alignItems: 'center',
-    backgroundColor: '#F7F8FC',
-  },
-  tabActive: {
-    backgroundColor: '#FFFFFF',
-    borderBottomWidth: 2,
-    borderBottomColor: '#5A67D8',
-  },
-  tabText: { fontSize: 15, fontWeight: '500', color: '#A0AEC0' },
-  tabTextActive: { color: '#5A67D8' },
-  form: { padding: 20, paddingTop: 4 },
-  input: {
-    backgroundColor: '#FFFFFF',
-    borderWidth: 0,
-    borderRadius: 14,
-    paddingHorizontal: 14,
-    paddingVertical: 13,
-    fontSize: 15,
-    color: '#1A202C',
-    marginTop: 10,
-  },
-  error: { color: '#E53E3E', fontSize: 13, marginTop: 8 },
-  btn: {
-    backgroundColor: '#5A67D8',
-    borderRadius: 12,
-    paddingVertical: 14,
-    alignItems: 'center',
-    marginTop: 16,
-    shadowColor: '#5A67D8',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
-    shadowRadius: 8,
-    elevation: 4,
-  },
-  btnText: { fontSize: 16, fontWeight: '600', color: '#FFFFFF' },
-  successBox: { alignItems: 'center', padding: 24 },
-  successIcon: { fontSize: 40 },
-  successTitle: { fontSize: 18, fontWeight: '700', color: '#1A202C', marginTop: 12 },
-  successText: {
-    fontSize: 14,
-    color: '#718096',
-    textAlign: 'center',
-    marginTop: 8,
-    lineHeight: 22,
-  },
-});
+function makeStyles(c: ReturnType<typeof useTheme>['colors']) {
+  return StyleSheet.create({
+    gradient: { flex: 1 },
+
+    // Decorative background circles
+    circleTopLeft: {
+      position: 'absolute', top: -80, left: -80,
+      width: 260, height: 260, borderRadius: 130,
+      backgroundColor: 'rgba(87, 201, 196, 0.12)',
+    },
+    circleBottomRight: {
+      position: 'absolute', bottom: -100, right: -60,
+      width: 300, height: 300, borderRadius: 150,
+      backgroundColor: 'rgba(14, 65, 102, 0.5)',
+    },
+
+    scroll: {
+      flexGrow: 1,
+      justifyContent: 'center',
+      paddingHorizontal: 28,
+      paddingTop: Platform.OS === 'ios' ? 80 : 60,
+      paddingBottom: 60,
+    },
+
+    // Logo / wordmark
+    logoArea: { alignItems: 'center', marginBottom: 40 },
+    iconRing: {
+      width: 54, height: 54, borderRadius: 27,
+      borderWidth: 1.5, borderColor: 'rgba(87,201,196,0.5)',
+      backgroundColor: 'rgba(87,201,196,0.12)',
+      alignItems: 'center', justifyContent: 'center',
+      marginBottom: 18,
+    },
+    wordmark: {
+      fontSize: 64,
+      fontWeight: '900',
+      color: '#FFFFFF',
+      letterSpacing: 6,
+      textShadowColor: 'rgba(0,0,0,0.3)',
+      textShadowOffset: { width: 0, height: 3 },
+      textShadowRadius: 8,
+    },
+    wordmarkUnderline: {
+      width: 48, height: 3, borderRadius: 2,
+      backgroundColor: '#57C9C4',
+      marginTop: 8, marginBottom: 14,
+    },
+    tagline: {
+      fontSize: 14,
+      color: 'rgba(255,255,255,0.6)',
+      letterSpacing: 0.3,
+      textAlign: 'center',
+    },
+
+    // Form card
+    card: {
+      backgroundColor: '#FFFFFF',
+      borderRadius: 28,
+      padding: 24,
+      shadowColor: '#000',
+      shadowOffset: { width: 0, height: 12 },
+      shadowOpacity: 0.25,
+      shadowRadius: 24,
+      elevation: 12,
+    },
+    tabs: {
+      flexDirection: 'row',
+      backgroundColor: '#F1F5F9',
+      borderRadius: 14, padding: 4, marginBottom: 20,
+    },
+    tab:           { flex: 1, paddingVertical: 10, alignItems: 'center', borderRadius: 10 },
+    tabActive:     { backgroundColor: '#fff', shadowColor: '#000', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.08, shadowRadius: 4, elevation: 2 },
+    tabText:       { fontSize: 14, fontWeight: '500', color: '#94A3B8' },
+    tabTextActive: { color: '#0E4166', fontWeight: '700' },
+
+    inputWrap: {
+      flexDirection: 'row', alignItems: 'center',
+      backgroundColor: '#F8FAFC',
+      borderRadius: 14, marginBottom: 12,
+      paddingHorizontal: 14,
+    },
+    inputIcon: { marginRight: 10 },
+    input: {
+      flex: 1,
+      paddingVertical: 14,
+      fontSize: 15, color: '#0F172A',
+    },
+
+    error:      { fontSize: 13, color: '#E53E3E', textAlign: 'center', marginBottom: 10 },
+    submitBtn: {
+      backgroundColor: '#0E4166',
+      borderRadius: 14, paddingVertical: 16,
+      alignItems: 'center', marginTop: 4, marginBottom: 16,
+      shadowColor: '#0E4166',
+      shadowOffset: { width: 0, height: 4 },
+      shadowOpacity: 0.4, shadowRadius: 10, elevation: 6,
+    },
+    submitText:  { fontSize: 16, fontWeight: '700', color: '#fff' },
+    switchText:  { fontSize: 13, color: '#94A3B8', textAlign: 'center' },
+    switchLink:  { color: '#0B7A75', fontWeight: '700' },
+  });
+}

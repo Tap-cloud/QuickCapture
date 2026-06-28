@@ -1,18 +1,18 @@
 {
   "expo": {
-    "name": "Later",
-    "slug": "later",
-    "scheme": "later",
+    "name": "Cove",
+    "slug": "cove",
+    "scheme": "cove",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.liamki.quickcapture"
+      "bundleIdentifier": "com.liamki.cove"
     },
     "android": {
-      "package": "com.liamki.quickcapture",
+      "package": "com.liamki.cove",
       "adaptiveIcon": {
         "backgroundColor": "#E6F4FE",
         "foregroundImage": "./assets/android-icon-foreground.png",

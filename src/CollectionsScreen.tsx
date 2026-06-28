@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import {
   View, Text, ScrollView, TouchableOpacity, Image, Modal,
   TextInput, StyleSheet, Platform, Linking, Alert,
@@ -11,6 +11,7 @@ import {
   loadUserCollections, createUserCollection, deleteUserCollection,
 } from './storage';
 import { COLLECTION_TAGS } from './tagger';
+import { useTheme } from './theme';
 
 // ── Constants ────────────────────────────────────────────────
 
@@ -19,46 +20,34 @@ const GRADIENTS: [string, string][] = [
   ['#FFF1F2', '#FFE0E3'], ['#F0F9FF', '#DBEEFE'], ['#FEFCE8', '#FEF3C0'],
   ['#F5F3FF', '#E5DEFF'], ['#FDF4FF', '#F3E8FF'],
 ];
-
+const GRADIENTS_DARK: [string, string][] = [
+  ['#1E1B4B', '#2E2A6B'], ['#431407', '#7C2D12'], ['#052E16', '#064E3B'],
+  ['#4C0519', '#881337'], ['#0C1A2E', '#1E3A5F'], ['#422006', '#713F12'],
+  ['#2E1065', '#4C1D95'], ['#3B0764', '#581C87'],
+];
 const AUTO_EMOJIS: Record<string, string> = {
-  recipe: '🍜', food: '🍜', cooking: '🍳', ramen: '🍜', meal: '🍽️',
-  travel: '✈️', japan: '🗾', paris: '🗼', trip: '🗺️',
-  startup: '💡', business: '💼', finance: '💰', investing: '📈',
-  book: '📚', books: '📚', reading: '📖',
-  tech: '💻', coding: '👨‍💻', programming: '💻',
-  fitness: '💪', workout: '🏋️', health: '🏥', exercise: '🏃',
-  video: '🎥', youtube: '▶️', film: '🎬',
-  music: '🎵', art: '🎨', design: '✏️',
-  article: '📰', news: '📰', link: '🔗',
+  recipe: '🍜', food: '🍜', cooking: '🍳', travel: '✈️', fitness: '💪',
+  workout: '🏋️', music: '🎵', tech: '💻', coding: '👨‍💻', finance: '💰',
+  investing: '📈', video: '🎥', youtube: '▶️', book: '📚', reading: '📖',
+  health: '🏥', art: '🎨', design: '✏️', business: '💼', startup: '💡',
+  article: '📰', news: '📰', photography: '📸',
 };
-
 const EMOJI_OPTIONS = [
-  '📁','📚','🎵','🎬','🍜','🍕','✈️','💡','💼','💰',
-  '📈','🏋️','💻','🎨','📰','🔗','🏠','🎮','🌍','❤️',
-  '⭐','🔖','📝','🎯','🛒','📷','☕','🏖️','🧳','🎪',
+  '📁','🍜','🎵','💪','✈️','💻','💰','📚','🎥','🏥','🎨','💼',
+  '📰','🌿','🏠','🐾','🎮','📷','🧘','🏄','🍕','🏋️','📈','🎬',
+  '🌍','🛒','💡','📝','🎓','🔬',
 ];
 
-// ── Types ────────────────────────────────────────────────────
-
 interface AutoCollection {
-  tag: string;
-  name: string;
-  count: number;
-  thumbnail?: string;
-  colors: [string, string];
-  emoji: string;
+  tag: string; name: string; count: number; thumbnail?: string;
+  colors: [string, string]; emoji: string;
 }
-
-interface DetailConfig {
-  type: 'manual' | 'auto';
-  name: string;
-  emoji: string;
-  tag?: string;
-}
+interface DetailConfig { type: 'manual' | 'auto'; name: string; emoji: string; tag?: string }
 
 // ── Helpers ──────────────────────────────────────────────────
 
-function buildAutoCollections(captures: Capture[]): AutoCollection[] {
+function buildAutoCollections(captures: Capture[], isDark: boolean): AutoCollection[] {
+  const grads = isDark ? GRADIENTS_DARK : GRADIENTS;
   const map = new Map<string, { count: number; thumbnail?: string }>();
   for (const c of captures) {
     for (const tag of c.tags) {
@@ -74,7 +63,7 @@ function buildAutoCollections(captures: Capture[]): AutoCollection[] {
     .slice(0, 12)
     .map(([tag, { count, thumbnail }], i) => ({
       tag, name: tag.charAt(0).toUpperCase() + tag.slice(1),
-      count, thumbnail, colors: GRADIENTS[i % GRADIENTS.length],
+      count, thumbnail, colors: grads[i % grads.length],
       emoji: AUTO_EMOJIS[tag] ?? '📁',
     }));
 }
@@ -95,24 +84,23 @@ function getDomain(url?: string) {
 
 function timeAgo(d: string) {
   const mins = Math.floor((Date.now() - new Date(d).getTime()) / 60000);
-  if (mins < 1) return 'Just now';
+  if (mins < 1)  return 'Just now';
   if (mins < 60) return `${mins}m ago`;
   const h = Math.floor(mins / 60);
-  if (h < 24) return `${h}h ago`;
+  if (h < 24)    return `${h}h ago`;
   return `${Math.floor(h / 24)}d ago`;
 }
 
 // ── Detail item ──────────────────────────────────────────────
 
 function DetailItem({ item }: { item: Capture }) {
-  const domain = getDomain(item.url);
+  const { colors } = useTheme();
+  const ds = useMemo(() => makeDetailStyles(colors), [colors]);
+  const domain  = getDomain(item.url);
   const initial = (item.site_name || item.title || 'Q').charAt(0).toUpperCase();
+
   return (
-    <TouchableOpacity
-      style={ds.item}
-      onPress={() => item.url ? Linking.openURL(item.url) : null}
-      activeOpacity={item.url ? 0.75 : 1}
-    >
+    <TouchableOpacity style={ds.item} onPress={() => item.url ? Linking.openURL(item.url) : null} activeOpacity={item.url ? 0.75 : 1}>
       {item.thumbnail_url ? (
         <Image source={{ uri: item.thumbnail_url }} style={ds.thumb} resizeMode="cover" />
       ) : (
@@ -128,7 +116,7 @@ function DetailItem({ item }: { item: Capture }) {
           <Text style={ds.metaText}>{timeAgo(item.created_at)}</Text>
         </View>
       </View>
-      <Ionicons name="chevron-forward" size={16} color="#E2E8F0" />
+      <Ionicons name="chevron-forward" size={16} color={colors.border} />
     </TouchableOpacity>
   );
 }
@@ -136,6 +124,9 @@ function DetailItem({ item }: { item: Capture }) {
 // ── Collection detail view ───────────────────────────────────
 
 function CollectionDetail({ config, captures, onBack }: { config: DetailConfig; captures: Capture[]; onBack: () => void }) {
+  const { colors } = useTheme();
+  const ds = useMemo(() => makeDetailStyles(colors), [colors]);
+
   const items = config.type === 'auto'
     ? captures.filter(c => c.tags.includes(config.tag!))
     : captures.filter(c => captureMatchesManual(c, config.name));
@@ -144,7 +135,7 @@ function CollectionDetail({ config, captures, onBack }: { config: DetailConfig; 
     <View style={ds.container}>
       <View style={ds.header}>
         <TouchableOpacity onPress={onBack} style={ds.backBtn} activeOpacity={0.7}>
-          <Ionicons name="arrow-back" size={22} color="#1A202C" />
+          <Ionicons name="arrow-back" size={22} color={colors.text} />
         </TouchableOpacity>
         <Text style={ds.headerEmoji}>{config.emoji}</Text>
         <View style={{ flex: 1 }}>
@@ -155,7 +146,6 @@ function CollectionDetail({ config, captures, onBack }: { config: DetailConfig; 
           </Text>
         </View>
       </View>
-
       <ScrollView contentContainerStyle={ds.list}>
         {items.length === 0 ? (
           <View style={ds.empty}>
@@ -178,15 +168,18 @@ function CollectionDetail({ config, captures, onBack }: { config: DetailConfig; 
 // ── Collection card ──────────────────────────────────────────
 
 function CollectionCard({
-  name, emoji, count, thumbnail, colors, showDelete, onPress, onDelete,
+  name, emoji, count, thumbnail, colors: gradColors, showDelete, onPress, onDelete,
 }: {
   name: string; emoji: string; count: number; thumbnail?: string;
   colors: [string, string]; showDelete?: boolean;
   onPress: () => void; onDelete?: () => void;
 }) {
+  const { colors } = useTheme();
+  const s = useMemo(() => makeStyles(colors), [colors]);
+
   return (
     <TouchableOpacity style={s.cardWrap} activeOpacity={0.85} onPress={onPress}>
-      <LinearGradient colors={colors} style={s.card} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}>
+      <LinearGradient colors={gradColors} style={s.card} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}>
         {thumbnail ? (
           <Image source={{ uri: thumbnail }} style={s.cardImage} resizeMode="cover" />
         ) : (
@@ -205,7 +198,7 @@ function CollectionCard({
           onPress={e => { e.stopPropagation?.(); onDelete(); }}
           hitSlop={{ top: 6, right: 6, bottom: 6, left: 6 }}
         >
-          <Ionicons name="close-circle" size={20} color="#CBD5E0" />
+          <Ionicons name="close-circle" size={20} color={colors.textMuted} />
         </TouchableOpacity>
       )}
     </TouchableOpacity>
@@ -214,6 +207,8 @@ function CollectionCard({
 
 // 2-column grid helper
 function CardGrid({ items }: { items: React.ReactNode[] }) {
+  const { colors } = useTheme();
+  const s = useMemo(() => makeStyles(colors), [colors]);
   const rows: React.ReactNode[][] = [];
   for (let i = 0; i < items.length; i += 2) rows.push(items.slice(i, i + 2));
   return (
@@ -234,36 +229,32 @@ function CreateModal({ visible, onClose, onSave }: {
   visible: boolean; onClose: () => void;
   onSave: (name: string, emoji: string) => Promise<void>;
 }) {
-  const [name, setName]   = useState('');
-  const [emoji, setEmoji] = useState('📁');
+  const { colors } = useTheme();
+  const m = useMemo(() => makeModalStyles(colors), [colors]);
+
+  const [name, setName]     = useState('');
+  const [emoji, setEmoji]   = useState('📁');
   const [saving, setSaving] = useState(false);
 
   async function handleSave() {
     if (!name.trim()) return;
     setSaving(true);
     await onSave(name.trim(), emoji);
-    setName('');
-    setEmoji('📁');
-    setSaving(false);
+    setName(''); setEmoji('📁'); setSaving(false);
   }
 
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
-      <KeyboardAvoidingView
-        style={m.overlay}
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-      >
+      <KeyboardAvoidingView style={m.overlay} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
         <TouchableOpacity style={m.backdrop} activeOpacity={1} onPress={onClose} />
         <View style={m.sheet}>
           <View style={m.handle} />
           <Text style={m.sheetTitle}>New Collection</Text>
 
-          {/* Selected emoji preview */}
           <View style={m.emojiPreview}>
             <Text style={m.emojiPreviewText}>{emoji}</Text>
           </View>
 
-          {/* Emoji picker */}
           <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={m.emojiRow}>
             {EMOJI_OPTIONS.map(e => (
               <TouchableOpacity
@@ -277,32 +268,23 @@ function CreateModal({ visible, onClose, onSave }: {
             ))}
           </ScrollView>
 
-          {/* Name input */}
           <TextInput
             style={m.input}
             placeholder="Collection name…"
-            placeholderTextColor="#A0AEC0"
-            value={name}
-            onChangeText={setName}
-            autoFocus
-            returnKeyType="done"
-            onSubmitEditing={handleSave}
+            placeholderTextColor={colors.textMuted}
+            value={name} onChangeText={setName}
+            autoFocus returnKeyType="done" onSubmitEditing={handleSave}
           />
 
-          {/* Buttons */}
           <View style={m.btns}>
             <TouchableOpacity style={m.cancelBtn} onPress={onClose} activeOpacity={0.7}>
               <Text style={m.cancelText}>Cancel</Text>
             </TouchableOpacity>
             <TouchableOpacity
               style={[m.saveBtn, (!name.trim() || saving) && m.saveBtnDisabled]}
-              onPress={handleSave}
-              activeOpacity={0.8}
-              disabled={!name.trim() || saving}
+              onPress={handleSave} activeOpacity={0.8} disabled={!name.trim() || saving}
             >
-              {saving
-                ? <ActivityIndicator size="small" color="#fff" />
-                : <Text style={m.saveText}>Create</Text>}
+              {saving ? <ActivityIndicator size="small" color="#fff" /> : <Text style={m.saveText}>Create</Text>}
             </TouchableOpacity>
           </View>
         </View>
@@ -316,15 +298,16 @@ function CreateModal({ visible, onClose, onSave }: {
 interface Props { captures: Capture[] }
 
 export default function CollectionsScreen({ captures }: Props) {
-  const [userCollections, setUserCollections]   = useState<UserCollection[]>([]);
-  const [detail, setDetail]                     = useState<DetailConfig | null>(null);
-  const [showCreate, setShowCreate]             = useState(false);
+  const { colors, isDark } = useTheme();
+  const s = useMemo(() => makeStyles(colors), [colors]);
 
-  const autoCollections = buildAutoCollections(captures);
+  const [userCollections, setUserCollections] = useState<UserCollection[]>([]);
+  const [detail, setDetail]                   = useState<DetailConfig | null>(null);
+  const [showCreate, setShowCreate]           = useState(false);
 
-  useEffect(() => {
-    loadUserCollections().then(setUserCollections);
-  }, []);
+  const autoCollections = buildAutoCollections(captures, isDark);
+
+  useEffect(() => { loadUserCollections().then(setUserCollections); }, []);
 
   async function handleCreate(name: string, emoji: string) {
     await createUserCollection(name, emoji);
@@ -333,7 +316,7 @@ export default function CollectionsScreen({ captures }: Props) {
   }
 
   function handleDelete(id: string) {
-    Alert.alert('Delete Collection', 'Remove this collection? Your saved items won\'t be deleted.', [
+    Alert.alert('Delete Collection', "Remove this collection? Your saved items won't be deleted.", [
       { text: 'Cancel', style: 'cancel' },
       {
         text: 'Delete', style: 'destructive',
@@ -351,7 +334,6 @@ export default function CollectionsScreen({ captures }: Props) {
 
   return (
     <View style={s.container}>
-      {/* Header */}
       <View style={s.header}>
         <View>
           <Text style={s.title}>Collections</Text>
@@ -364,23 +346,20 @@ export default function CollectionsScreen({ captures }: Props) {
 
       <ScrollView contentContainerStyle={s.scrollContent} showsVerticalScrollIndicator={false}>
 
-        {/* ── My Collections ── */}
         <View style={s.section}>
           <Text style={s.sectionLabel}>My Collections</Text>
-
           {userCollections.length === 0 ? (
             <TouchableOpacity style={s.createPrompt} onPress={() => setShowCreate(true)} activeOpacity={0.8}>
-              <Ionicons name="add-circle-outline" size={22} color="#5A67D8" />
+              <Ionicons name="add-circle-outline" size={22} color={colors.primary} />
               <Text style={s.createPromptText}>Create your first collection</Text>
             </TouchableOpacity>
           ) : (
             <CardGrid items={userCollections.map((col, i) => (
               <CollectionCard
                 key={col.id}
-                name={col.name}
-                emoji={col.emoji}
+                name={col.name} emoji={col.emoji}
                 count={captures.filter(c => captureMatchesManual(c, col.name)).length}
-                colors={GRADIENTS[i % GRADIENTS.length]}
+                colors={isDark ? GRADIENTS_DARK[i % GRADIENTS_DARK.length] : GRADIENTS[i % GRADIENTS.length]}
                 showDelete
                 onPress={() => setDetail({ type: 'manual', name: col.name, emoji: col.emoji })}
                 onDelete={() => handleDelete(col.id)}
@@ -389,7 +368,6 @@ export default function CollectionsScreen({ captures }: Props) {
           )}
         </View>
 
-        {/* ── Auto Collections ── */}
         {autoCollections.length > 0 && (
           <View style={s.section}>
             <Text style={s.sectionLabel}>Auto Collections</Text>
@@ -397,11 +375,8 @@ export default function CollectionsScreen({ captures }: Props) {
             <CardGrid items={autoCollections.map(col => (
               <CollectionCard
                 key={col.tag}
-                name={col.name}
-                emoji={col.emoji}
-                count={col.count}
-                thumbnail={col.thumbnail}
-                colors={col.colors}
+                name={col.name} emoji={col.emoji}
+                count={col.count} thumbnail={col.thumbnail} colors={col.colors}
                 onPress={() => setDetail({ type: 'auto', name: col.name, emoji: col.emoji, tag: col.tag })}
               />
             ))} />
@@ -420,147 +395,127 @@ export default function CollectionsScreen({ captures }: Props) {
 
       </ScrollView>
 
-      <CreateModal
-        visible={showCreate}
-        onClose={() => setShowCreate(false)}
-        onSave={handleCreate}
-      />
+      <CreateModal visible={showCreate} onClose={() => setShowCreate(false)} onSave={handleCreate} />
     </View>
   );
 }
 
 // ── Styles ───────────────────────────────────────────────────
 
-const s = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#FFFFFF' },
-  header: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingTop: Platform.OS === 'ios' ? 60 : 48,
-    paddingHorizontal: 20,
-    paddingBottom: 16,
-    borderBottomWidth: 1,
-    borderBottomColor: '#F0F0F0',
-  },
-  title:    { fontSize: 26, fontWeight: '700', color: '#1A202C' },
-  subtitle: { fontSize: 13, color: '#A0AEC0', marginTop: 1 },
-  addBtn: {
-    width: 38, height: 38, borderRadius: 12,
-    backgroundColor: '#5A67D8',
-    alignItems: 'center', justifyContent: 'center',
-  },
+function makeStyles(c: ReturnType<typeof useTheme>['colors']) {
+  return StyleSheet.create({
+    container: { flex: 1, backgroundColor: c.bg },
+    header: {
+      flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
+      paddingTop: Platform.OS === 'ios' ? 60 : 48,
+      paddingHorizontal: 20, paddingBottom: 16,
+      borderBottomWidth: 1, borderBottomColor: c.border,
+    },
+    title:    { fontSize: 26, fontWeight: '700', color: c.text },
+    subtitle: { fontSize: 13, color: c.textMuted, marginTop: 1 },
+    addBtn:   { width: 38, height: 38, borderRadius: 12, backgroundColor: c.primary, alignItems: 'center', justifyContent: 'center' },
 
-  scrollContent: { paddingBottom: 100 },
+    scrollContent: { paddingBottom: 100 },
 
-  section:      { paddingHorizontal: 16, paddingTop: 24 },
-  sectionLabel: { fontSize: 12, fontWeight: '700', color: '#A0AEC0', textTransform: 'uppercase', letterSpacing: 0.8, marginBottom: 4 },
-  sectionSub:   { fontSize: 12, color: '#CBD5E0', marginBottom: 12 },
+    section:      { paddingHorizontal: 16, paddingTop: 24 },
+    sectionLabel: { fontSize: 12, fontWeight: '700', color: c.textMuted, textTransform: 'uppercase', letterSpacing: 0.8, marginBottom: 4 },
+    sectionSub:   { fontSize: 12, color: c.sectionHead, marginBottom: 12 },
 
-  createPrompt: {
-    flexDirection: 'row', alignItems: 'center', gap: 10,
-    backgroundColor: '#F7F8FC', borderRadius: 16,
-    padding: 16, marginTop: 8,
-    borderWidth: 1.5, borderStyle: 'dashed', borderColor: '#C3CCFF',
-  },
-  createPromptText: { fontSize: 14, color: '#5A67D8', fontWeight: '600' },
+    createPrompt: {
+      flexDirection: 'row', alignItems: 'center', gap: 10,
+      backgroundColor: c.bgSoft, borderRadius: 16, padding: 16, marginTop: 8,
+      borderWidth: 1.5, borderStyle: 'dashed', borderColor: c.primary,
+    },
+    createPromptText: { fontSize: 14, color: c.primary, fontWeight: '600' },
 
-  grid:       { marginTop: 8 },
-  gridRow:    { flexDirection: 'row', gap: 12, marginBottom: 12 },
-  cardSpacer: { flex: 1 },
+    grid:       { marginTop: 8 },
+    gridRow:    { flexDirection: 'row', gap: 12, marginBottom: 12 },
+    cardSpacer: { flex: 1 },
 
-  cardWrap: {
-    flex: 1, borderRadius: 20, overflow: 'hidden',
-    shadowColor: '#000', shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.07, shadowRadius: 8, elevation: 3,
-    position: 'relative',
-  },
-  card:      { borderRadius: 20, overflow: 'hidden' },
-  cardImage: { width: '100%', height: 110 },
-  emojiWrap: { width: '100%', height: 110, alignItems: 'center', justifyContent: 'center' },
-  emoji:     { fontSize: 44 },
-  cardInfo:  { padding: 12 },
-  cardName:  { fontSize: 15, fontWeight: '700', color: '#1A202C' },
-  cardCount: { fontSize: 12, color: '#718096', marginTop: 2 },
-  deleteBtn: { position: 'absolute', top: 8, right: 8 },
+    cardWrap: {
+      flex: 1, borderRadius: 20, overflow: 'hidden',
+      shadowColor: '#000', shadowOffset: { width: 0, height: 2 },
+      shadowOpacity: 0.07, shadowRadius: 8, elevation: 3, position: 'relative',
+    },
+    card:      { borderRadius: 20, overflow: 'hidden' },
+    cardImage: { width: '100%', height: 110 },
+    emojiWrap: { width: '100%', height: 110, alignItems: 'center', justifyContent: 'center' },
+    emoji:     { fontSize: 44 },
+    cardInfo:  { padding: 12 },
+    cardName:  { fontSize: 15, fontWeight: '700', color: c.text },
+    cardCount: { fontSize: 12, color: c.textSub, marginTop: 2 },
+    deleteBtn: { position: 'absolute', top: 8, right: 8 },
 
-  emptyState: { alignItems: 'center', paddingTop: 60, paddingHorizontal: 40 },
-  emptyIcon:  { fontSize: 48 },
-  emptyTitle: { fontSize: 18, fontWeight: '600', color: '#2D3748', marginTop: 12 },
-  emptyText:  { fontSize: 14, color: '#A0AEC0', marginTop: 6, textAlign: 'center', lineHeight: 22 },
-});
+    emptyState: { alignItems: 'center', paddingTop: 60, paddingHorizontal: 40 },
+    emptyIcon:  { fontSize: 48 },
+    emptyTitle: { fontSize: 18, fontWeight: '600', color: c.text, marginTop: 12 },
+    emptyText:  { fontSize: 14, color: c.textMuted, marginTop: 6, textAlign: 'center', lineHeight: 22 },
+  });
+}
 
-// Detail styles
-const ds = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#FFFFFF' },
-  header: {
-    flexDirection: 'row', alignItems: 'center', gap: 12,
-    paddingTop: Platform.OS === 'ios' ? 60 : 48,
-    paddingHorizontal: 20, paddingBottom: 16,
-    borderBottomWidth: 1, borderBottomColor: '#F0F0F0',
-  },
-  backBtn:     { padding: 4 },
-  headerEmoji: { fontSize: 26 },
-  headerTitle: { fontSize: 20, fontWeight: '700', color: '#1A202C' },
-  headerSub:   { fontSize: 12, color: '#A0AEC0', marginTop: 2 },
-  list:        { paddingHorizontal: 14, paddingTop: 8, paddingBottom: 100 },
-  item: {
-    flexDirection: 'row', alignItems: 'center',
-    backgroundColor: '#F7F8FC', borderRadius: 16,
-    padding: 12, marginBottom: 8,
-  },
-  thumb:            { width: 60, height: 60, borderRadius: 12, backgroundColor: '#ECEEF2' },
-  thumbPlaceholder: { backgroundColor: '#EEF2FF', alignItems: 'center', justifyContent: 'center' },
-  thumbInitial:     { fontSize: 20, fontWeight: '700', color: '#5A67D8' },
-  info:    { flex: 1, marginHorizontal: 12 },
-  title:   { fontSize: 14, fontWeight: '600', color: '#1A202C', lineHeight: 19 },
-  summary: { fontSize: 12, color: '#718096', marginTop: 3, lineHeight: 16 },
-  meta:    { flexDirection: 'row', marginTop: 5 },
-  metaText: { fontSize: 11, color: '#A0AEC0' },
-  empty: { alignItems: 'center', paddingTop: 80, paddingHorizontal: 40 },
-  emptyEmoji: { fontSize: 48 },
-  emptyTitle: { fontSize: 18, fontWeight: '600', color: '#2D3748', marginTop: 12 },
-  emptyText:  { fontSize: 14, color: '#A0AEC0', marginTop: 6, textAlign: 'center', lineHeight: 22 },
-});
+function makeDetailStyles(c: ReturnType<typeof useTheme>['colors']) {
+  return StyleSheet.create({
+    container: { flex: 1, backgroundColor: c.bg },
+    header: {
+      flexDirection: 'row', alignItems: 'center', gap: 12,
+      paddingTop: Platform.OS === 'ios' ? 60 : 48,
+      paddingHorizontal: 20, paddingBottom: 16,
+      borderBottomWidth: 1, borderBottomColor: c.border,
+    },
+    backBtn:     { padding: 4 },
+    headerEmoji: { fontSize: 26 },
+    headerTitle: { fontSize: 20, fontWeight: '700', color: c.text },
+    headerSub:   { fontSize: 12, color: c.textMuted, marginTop: 2 },
+    list:        { paddingHorizontal: 14, paddingTop: 8, paddingBottom: 100 },
+    item: {
+      flexDirection: 'row', alignItems: 'center',
+      backgroundColor: c.bgSoft, borderRadius: 16, padding: 12, marginBottom: 8,
+    },
+    thumb:            { width: 60, height: 60, borderRadius: 12, backgroundColor: c.border },
+    thumbPlaceholder: { backgroundColor: c.primaryBg, alignItems: 'center', justifyContent: 'center' },
+    thumbInitial:     { fontSize: 20, fontWeight: '700', color: c.primary },
+    info:     { flex: 1, marginHorizontal: 12 },
+    title:    { fontSize: 14, fontWeight: '600', color: c.text, lineHeight: 19 },
+    summary:  { fontSize: 12, color: c.textSub, marginTop: 3, lineHeight: 16 },
+    meta:     { flexDirection: 'row', marginTop: 5 },
+    metaText: { fontSize: 11, color: c.textMuted },
+    empty:      { alignItems: 'center', paddingTop: 80, paddingHorizontal: 40 },
+    emptyEmoji: { fontSize: 48 },
+    emptyTitle: { fontSize: 18, fontWeight: '600', color: c.text, marginTop: 12 },
+    emptyText:  { fontSize: 14, color: c.textMuted, marginTop: 6, textAlign: 'center', lineHeight: 22 },
+  });
+}
 
-// Modal styles
-const m = StyleSheet.create({
-  overlay: { flex: 1, justifyContent: 'flex-end' },
-  backdrop: { ...StyleSheet.absoluteFill, backgroundColor: 'rgba(0,0,0,0.4)' },
-  sheet: {
-    backgroundColor: '#fff',
-    borderTopLeftRadius: 28, borderTopRightRadius: 28,
-    padding: 24, paddingBottom: Platform.OS === 'ios' ? 40 : 24,
-  },
-  handle: {
-    width: 36, height: 4, borderRadius: 2,
-    backgroundColor: '#E2E8F0', alignSelf: 'center', marginBottom: 20,
-  },
-  sheetTitle: { fontSize: 20, fontWeight: '700', color: '#1A202C', textAlign: 'center', marginBottom: 20 },
+function makeModalStyles(c: ReturnType<typeof useTheme>['colors']) {
+  return StyleSheet.create({
+    overlay:  { flex: 1, justifyContent: 'flex-end' },
+    backdrop: { ...StyleSheet.absoluteFill, backgroundColor: 'rgba(0,0,0,0.5)' },
+    sheet: {
+      backgroundColor: c.bg,
+      borderTopLeftRadius: 28, borderTopRightRadius: 28,
+      padding: 24, paddingBottom: Platform.OS === 'ios' ? 40 : 24,
+    },
+    handle:     { width: 36, height: 4, borderRadius: 2, backgroundColor: c.border, alignSelf: 'center', marginBottom: 20 },
+    sheetTitle: { fontSize: 20, fontWeight: '700', color: c.text, textAlign: 'center', marginBottom: 20 },
 
-  emojiPreview: {
-    width: 72, height: 72, borderRadius: 20,
-    backgroundColor: '#F7F8FC', alignItems: 'center', justifyContent: 'center',
-    alignSelf: 'center', marginBottom: 16,
-  },
-  emojiPreviewText: { fontSize: 38 },
+    emojiPreview:     { width: 72, height: 72, borderRadius: 20, backgroundColor: c.bgSoft, alignItems: 'center', justifyContent: 'center', alignSelf: 'center', marginBottom: 16 },
+    emojiPreviewText: { fontSize: 38 },
+    emojiRow:         { paddingHorizontal: 4, gap: 8, paddingBottom: 4 },
+    emojiOption:      { width: 44, height: 44, borderRadius: 12, alignItems: 'center', justifyContent: 'center', backgroundColor: c.bgSoft },
+    emojiSelected:    { backgroundColor: c.primaryBg, borderWidth: 2, borderColor: c.primary },
+    emojiOptionText:  { fontSize: 22 },
 
-  emojiRow:       { paddingHorizontal: 4, gap: 8, paddingBottom: 4 },
-  emojiOption:    { width: 44, height: 44, borderRadius: 12, alignItems: 'center', justifyContent: 'center', backgroundColor: '#F7F8FC' },
-  emojiSelected:  { backgroundColor: '#EEF2FF', borderWidth: 2, borderColor: '#5A67D8' },
-  emojiOptionText: { fontSize: 22 },
+    input: {
+      backgroundColor: c.bgSoft, borderRadius: 14,
+      paddingHorizontal: 16, paddingVertical: 14,
+      fontSize: 16, color: c.text, marginTop: 16, marginBottom: 20,
+    },
 
-  input: {
-    backgroundColor: '#F7F8FC', borderRadius: 14,
-    paddingHorizontal: 16, paddingVertical: 14,
-    fontSize: 16, color: '#1A202C',
-    marginTop: 16, marginBottom: 20,
-  },
-
-  btns:      { flexDirection: 'row', gap: 12 },
-  cancelBtn: { flex: 1, paddingVertical: 14, borderRadius: 14, backgroundColor: '#F7F8FC', alignItems: 'center' },
-  cancelText: { fontSize: 15, fontWeight: '600', color: '#718096' },
-  saveBtn:   { flex: 1, paddingVertical: 14, borderRadius: 14, backgroundColor: '#5A67D8', alignItems: 'center' },
-  saveBtnDisabled: { opacity: 0.5 },
-  saveText:  { fontSize: 15, fontWeight: '700', color: '#fff' },
-});
+    btns:            { flexDirection: 'row', gap: 12 },
+    cancelBtn:       { flex: 1, paddingVertical: 14, borderRadius: 14, backgroundColor: c.bgSoft, alignItems: 'center' },
+    cancelText:      { fontSize: 15, fontWeight: '600', color: c.textSub },
+    saveBtn:         { flex: 1, paddingVertical: 14, borderRadius: 14, backgroundColor: c.primary, alignItems: 'center' },
+    saveBtnDisabled: { opacity: 0.5 },
+    saveText:        { fontSize: 15, fontWeight: '700', color: '#fff' },
+  });
+}

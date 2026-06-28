@@ -3,117 +3,181 @@ import { CLAUDE_API_KEY } from '../config';
 // ── Local synonym map (works without any API key) ────────────
 // Bidirectional — searching any word finds all related ones
 
+// Hierarchy rule:
+//   BROAD terms list their specific children — so "food" finds ramen, pasta, etc.
+//   SPECIFIC terms list only lateral peers — so "ramen" never expands up to "food"
+//   (which would then drag in grilled cheese, pizza, anything tagged "food")
 const SYNONYMS: Record<string, string[]> = {
-  // Food & cooking — includes specific foods so "food" search finds "grilled cheese" etc.
-  food:        ['recipe', 'cooking', 'meal', 'cuisine', 'dish', 'ingredient', 'restaurant',
-                'baking', 'diet', 'grilled', 'cheese', 'chicken', 'pasta', 'pizza', 'ramen',
-                'burger', 'sandwich', 'salmon', 'breakfast', 'dinner', 'dessert', 'snack',
-                'noodle', 'sauce', 'salad', 'soup', 'steak', 'sushi', 'curry', 'taco',
-                'baked', 'fried', 'roasted'],
-  recipe:      ['cooking', 'food', 'meal', 'cuisine', 'cook', 'ingredient', 'dish', 'baking',
-                'grilled', 'cheese', 'chicken', 'pasta', 'pizza', 'ramen', 'salmon', 'dinner'],
-  cooking:     ['recipe', 'food', 'meal', 'cuisine', 'cook', 'kitchen', 'baking', 'grilled'],
-  meal:        ['food', 'recipe', 'cooking', 'dish', 'lunch', 'dinner', 'breakfast'],
-  restaurant:  ['food', 'dining', 'cuisine', 'chef'],
-  baking:      ['recipe', 'cooking', 'food', 'dessert', 'cake', 'bread'],
-  diet:        ['food', 'nutrition', 'health', 'meal', 'calories'],
 
-  // Fitness
-  workout:  ['exercise', 'fitness', 'gym', 'training', 'health', 'sport', 'running'],
+  // ── FOOD: broad → lists specific dishes ──────────────────────
+  food:       ['recipe', 'cooking', 'meal', 'cuisine', 'dish', 'ingredient', 'restaurant',
+               'baking', 'diet', 'breakfast', 'dinner', 'lunch', 'snack',
+               'ramen', 'pasta', 'pizza', 'sushi', 'burger', 'steak', 'chicken',
+               'salmon', 'soup', 'salad', 'curry', 'taco', 'dessert', 'noodle', 'cheese'],
+  recipe:     ['cooking', 'food', 'meal', 'cuisine', 'ingredient', 'dish', 'baking',
+               'ramen', 'pasta', 'pizza', 'sushi', 'burger', 'chicken', 'salmon',
+               'steak', 'curry', 'taco', 'dessert', 'salad', 'soup'],
+  cooking:    ['recipe', 'food', 'meal', 'cuisine', 'kitchen', 'baking', 'grilling'],
+  meal:       ['food', 'recipe', 'cooking', 'dish', 'lunch', 'dinner', 'breakfast'],
+  restaurant: ['food', 'dining', 'cuisine', 'chef', 'eating'],
+  baking:     ['recipe', 'cooking', 'food', 'dessert', 'cake', 'bread', 'pastry'],
+  diet:       ['food', 'nutrition', 'health', 'meal', 'calories', 'eating'],
+
+  // ── FOOD: specific dishes → only terms uniquely tied to that dish ──
+  // Rule: no geographic terms (japanese, asian, italian), no broad categories (soup, food)
+  // Those terms match too many unrelated things (rice bowl is also "japanese")
+  ramen:   ['noodle', 'broth', 'tonkotsu', 'miso', 'shoyu', 'ramen-bowl'],
+  pasta:   ['spaghetti', 'penne', 'fettuccine', 'carbonara', 'bolognese', 'noodle'],
+  pizza:   ['pepperoni', 'mozzarella', 'dough', 'slice', 'pie'],
+  sushi:   ['nigiri', 'sashimi', 'roll', 'raw-fish', 'wasabi', 'soy-sauce'],
+  burger:  ['patty', 'bun', 'beef', 'cheeseburger', 'bbq'],
+  chicken: ['poultry', 'roasted', 'breast', 'wings', 'thigh'],
+  salmon:  ['fish', 'seafood', 'fillet', 'smoked'],
+  steak:   ['beef', 'ribeye', 'sirloin', 'medium-rare', 'grill'],
+  soup:    ['broth', 'stew', 'chowder', 'bisque'],
+  salad:   ['greens', 'lettuce', 'dressing', 'tossed'],
+  curry:   ['spice', 'coconut-milk', 'masala', 'tikka'],
+  taco:    ['tortilla', 'salsa', 'burrito', 'quesadilla'],
+  dessert: ['cake', 'chocolate', 'cookie', 'ice-cream', 'pastry', 'brownie'],
+  noodle:  ['ramen', 'pasta', 'udon', 'soba', 'pho', 'lo-mein'],
+
+  // ── FITNESS ──────────────────────────────────────────────────
+  workout:  ['exercise', 'fitness', 'gym', 'training', 'health', 'sport', 'running', 'yoga'],
   exercise: ['workout', 'fitness', 'gym', 'training', 'health', 'sport'],
   fitness:  ['workout', 'exercise', 'gym', 'training', 'health', 'sport'],
-  gym:      ['workout', 'exercise', 'fitness', 'training', 'weightlifting'],
-  running:  ['workout', 'exercise', 'fitness', 'cardio', 'marathon', 'jogging'],
-  sport:    ['workout', 'exercise', 'fitness', 'athletic', 'competition'],
-  training: ['workout', 'exercise', 'fitness', 'gym', 'sport'],
-  yoga:     ['fitness', 'exercise', 'health', 'meditation', 'wellness'],
+  gym:      ['workout', 'exercise', 'fitness', 'training', 'weightlifting', 'weights'],
+  running:  ['cardio', 'marathon', 'jogging', 'sprint', 'race'],
+  sport:    ['athletic', 'competition', 'team', 'game'],
+  training: ['workout', 'exercise', 'fitness', 'gym', 'sport', 'practice'],
+  yoga:     ['meditation', 'stretch', 'flexibility', 'wellness', 'mindfulness'],
 
-  // Finance & money
-  money:     ['finance', 'investing', 'budget', 'savings', 'financial', 'wealth', 'income'],
-  investing: ['finance', 'money', 'stocks', 'investment', 'financial', 'wealth', 'trading'],
-  finance:   ['money', 'investing', 'budget', 'financial', 'economics', 'wealth'],
-  budget:    ['money', 'finance', 'savings', 'financial', 'spending'],
-  stocks:    ['investing', 'finance', 'money', 'trading', 'market'],
-  crypto:    ['investing', 'finance', 'money', 'bitcoin', 'blockchain'],
+  // ── FINANCE ──────────────────────────────────────────────────
+  money:     ['finance', 'investing', 'budget', 'savings', 'wealth', 'income'],
+  investing: ['finance', 'money', 'stocks', 'trading', 'portfolio', 'wealth'],
+  finance:   ['money', 'investing', 'budget', 'economics', 'wealth'],
+  budget:    ['money', 'finance', 'savings', 'spending', 'expenses'],
+  stocks:    ['investing', 'finance', 'trading', 'market', 'shares'],
+  crypto:    ['bitcoin', 'blockchain', 'ethereum', 'defi', 'trading'],
 
-  // Travel
+  // ── TRAVEL ───────────────────────────────────────────────────
   travel:      ['trip', 'vacation', 'journey', 'destination', 'tourism', 'adventure'],
   trip:        ['travel', 'vacation', 'journey', 'destination', 'tourism'],
-  vacation:    ['travel', 'trip', 'holiday', 'tourism', 'adventure'],
-  destination: ['travel', 'trip', 'tourism', 'location', 'place'],
-  adventure:   ['travel', 'trip', 'outdoors', 'explore', 'journey'],
+  vacation:    ['travel', 'trip', 'holiday', 'tourism', 'adventure', 'beach'],
+  destination: ['travel', 'trip', 'tourism', 'location', 'place', 'country'],
+  adventure:   ['travel', 'outdoors', 'explore', 'hiking', 'nature'],
 
-  // Tech & coding
+  // ── TECH & CODING ────────────────────────────────────────────
   coding:      ['programming', 'development', 'software', 'tech', 'developer', 'code'],
   programming: ['coding', 'development', 'software', 'tech', 'code', 'developer'],
-  technology:  ['tech', 'software', 'digital', 'coding', 'innovation'],
+  technology:  ['tech', 'software', 'digital', 'coding', 'innovation', 'ai'],
   tech:        ['technology', 'software', 'digital', 'coding', 'programming', 'developer'],
   software:    ['tech', 'coding', 'programming', 'app', 'development'],
   developer:   ['coding', 'programming', 'tech', 'software', 'engineer'],
   design:      ['art', 'creative', 'ui', 'ux', 'graphic', 'visual', 'branding'],
 
-  // Health & wellness
-  health:    ['fitness', 'wellness', 'medical', 'diet', 'exercise', 'workout', 'nutrition'],
+  // ── HEALTH ───────────────────────────────────────────────────
+  health:    ['fitness', 'wellness', 'medical', 'diet', 'exercise', 'nutrition'],
   wellness:  ['health', 'fitness', 'mental', 'meditation', 'nutrition', 'selfcare'],
   medical:   ['health', 'doctor', 'medicine', 'treatment', 'disease'],
-  nutrition: ['diet', 'food', 'health', 'eating', 'vitamins', 'meal'],
+  nutrition: ['diet', 'health', 'eating', 'vitamins', 'meal', 'food'],
 
-  // Videos & media
-  video:   ['youtube', 'film', 'watch', 'movie', 'clip', 'reel', 'streaming'],
+  // ── MEDIA ────────────────────────────────────────────────────
+  video:   ['youtube', 'film', 'watch', 'movie', 'clip', 'reel', 'streaming', 'vimeo'],
   youtube: ['video', 'watch', 'streaming', 'channel', 'clip'],
-  movie:   ['film', 'video', 'cinema', 'watch', 'streaming'],
-  film:    ['movie', 'video', 'cinema', 'watch', 'documentary'],
-  podcast: ['audio', 'listen', 'interview', 'talk', 'episode'],
-  music:   ['song', 'artist', 'album', 'playlist', 'audio', 'listen'],
+  movie:   ['film', 'cinema', 'watch', 'streaming', 'show'],
+  film:    ['movie', 'cinema', 'watch', 'documentary', 'streaming'],
+  podcast: ['episode', 'interview', 'host', 'transcript', 'show'],
+  music:   ['song', 'artist', 'album', 'playlist', 'spotify', 'lyrics', 'genre', 'musician'],
 
-  // Reading & articles
+  // ── READING ──────────────────────────────────────────────────
   article:  ['news', 'blog', 'post', 'reading', 'journalism', 'essay'],
   news:     ['article', 'journalism', 'current', 'media', 'headlines'],
   blog:     ['article', 'post', 'reading', 'writing', 'content'],
-  book:     ['reading', 'literature', 'novel', 'learn', 'nonfiction', 'fiction'],
-  reading:  ['book', 'article', 'blog', 'learn', 'literature'],
+  book:     ['reading', 'literature', 'novel', 'nonfiction', 'fiction', 'author'],
+  reading:  ['book', 'article', 'blog', 'literature'],
 
-  // Business
+  // ── BUSINESS ─────────────────────────────────────────────────
   business:     ['startup', 'entrepreneur', 'company', 'career', 'work', 'professional'],
   startup:      ['business', 'entrepreneur', 'company', 'product', 'venture'],
   entrepreneur: ['startup', 'business', 'founder', 'company'],
-  career:       ['business', 'work', 'job', 'professional', 'skill'],
+  career:       ['work', 'job', 'professional', 'skill', 'resume'],
 
-  // Learning
+  // ── LEARNING ─────────────────────────────────────────────────
   tutorial:  ['guide', 'howto', 'learn', 'course', 'education', 'lesson'],
   learning:  ['tutorial', 'education', 'course', 'study', 'skill'],
   education: ['learning', 'tutorial', 'course', 'study', 'school'],
   course:    ['learning', 'tutorial', 'education', 'lesson', 'skill'],
 
-  // Art & creativity
-  art:       ['design', 'creative', 'visual', 'illustration', 'drawing', 'painting'],
-  creative:  ['art', 'design', 'creative', 'illustration', 'photography'],
-  photography: ['photo', 'camera', 'art', 'visual', 'creative'],
+  // ── ART ──────────────────────────────────────────────────────
+  art:         ['design', 'creative', 'visual', 'illustration', 'drawing', 'painting'],
+  creative:    ['art', 'design', 'illustration', 'photography', 'visual'],
+  photography: ['photo', 'camera', 'art', 'visual', 'portrait', 'landscape'],
 
-  // Home
-  home:      ['house', 'interior', 'decor', 'furniture', 'design', 'diy'],
-  diy:       ['home', 'craft', 'tutorial', 'project', 'build'],
-  garden:    ['home', 'plants', 'outdoor', 'nature'],
+  // ── HOME ─────────────────────────────────────────────────────
+  home:   ['house', 'interior', 'decor', 'furniture', 'diy', 'renovation'],
+  diy:    ['craft', 'tutorial', 'project', 'build', 'home', 'make'],
+  garden: ['plants', 'outdoor', 'nature', 'flower', 'grow'],
 };
 
 function expandWithSynonyms(query: string): string[] {
   const q = query.toLowerCase().trim();
   const terms = new Set<string>([q]);
-
-  // Direct lookup
   if (SYNONYMS[q]) {
     for (const t of SYNONYMS[q]) terms.add(t);
   }
-
-  // Reverse lookup — any entry that lists q as a synonym
-  for (const [key, synonyms] of Object.entries(SYNONYMS)) {
-    if (synonyms.includes(q)) {
-      terms.add(key);
-      for (const t of synonyms) terms.add(t);
-    }
-  }
-
   return [...terms];
+}
+
+// ── Relevance scoring ─────────────────────────────────────────
+// Priority: description → title → tags → everything else
+// Exact query match scores higher than synonym match at each level.
+// Free-text checks use whole-word matching so "track" doesn't hit "tracking".
+
+function wholeWord(text: string, word: string): boolean {
+  try { return new RegExp(`\\b${word}\\b`).test(text); } catch { return false; }
+}
+
+// Minimum score a capture must reach to appear in results.
+// A single incidental mention in the raw description won't clear this bar.
+export const SCORE_THRESHOLD = 7;
+
+// Priority order (what the user wrote beats everything):
+//   1. content  — the note the user typed when saving
+//   2. title    — the video/file title
+//   3. tags     — auto-generated topic labels
+//   4. summary  — AI-generated summary
+//   5. description — raw video/page description (noisy; barely counts)
+export function scoreCapture(
+  c: { tags: string[]; title?: string | null; content: string; summary?: string | null; description?: string | null; category?: string | null; site_name?: string | null },
+  query: string,
+): number {
+  const q = query.toLowerCase().trim();
+  if (!q) return 0;
+
+  const synonyms = SYNONYMS[q] ?? [];
+  const note     = (c.content ?? '').toLowerCase();
+  const title    = (c.title ?? '').toLowerCase();
+  const tags     = c.tags.map(t => t.toLowerCase());
+  const summary  = (c.summary ?? '').toLowerCase();
+  const desc     = (c.description ?? '').toLowerCase();
+
+  let score = 0;
+
+  // Exact query hits — user note first, then title, then tags, then AI summary, then raw desc
+  if (wholeWord(note, q))                                              score += 14;
+  if (wholeWord(title, q))                                             score += 10;
+  if (tags.some(t => t === q || t.includes(q)))                        score += 8;
+  if (wholeWord(summary, q))                                           score += 5;
+  if (wholeWord(desc, q))                                              score += 2; // barely counts
+
+  // Synonym hits — same order, lower weights
+  if (synonyms.some(s => wholeWord(note, s)))                          score += 9;
+  if (synonyms.some(s => wholeWord(title, s)))                         score += 6;
+  if (tags.some(t => synonyms.some(s => t === s || t.includes(s))))   score += 5;
+  if (synonyms.some(s => wholeWord(summary, s)))                       score += 3;
+  if (synonyms.some(s => wholeWord(desc, s)))                          score += 1; // barely counts
+
+  return score;
 }
 
 // ── Valid collection tags (whitelist) ───────────────────────

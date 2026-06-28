@@ -1,13 +1,14 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import {
   View, Text, TextInput, ScrollView, TouchableOpacity,
-  Image, StyleSheet, Alert, Linking, ActivityIndicator,
+  Image, StyleSheet, Linking,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { Session } from '@supabase/supabase-js';
-import { Capture, removeCapture } from './storage';
-import { expandSearchQuery, COLLECTION_TAGS } from './tagger';
+import { Capture, removeCapture, updateCapture } from './storage';
+import { scoreCapture, SCORE_THRESHOLD, COLLECTION_TAGS } from './tagger';
+import { useTheme } from './theme';
 
 // ── Utilities ────────────────────────────────────────────────
 
@@ -17,7 +18,7 @@ function getDomain(url?: string) {
 }
 
 function getContentType(c: Capture) {
-  const url = (c.url ?? '').toLowerCase();
+  const url  = (c.url ?? '').toLowerCase();
   const tags = c.tags.map(t => t.toLowerCase());
   if (url.includes('youtube.com') || url.includes('youtu.be') || tags.includes('video')) return 'Video';
   if (tags.includes('pdf') || url.endsWith('.pdf')) return 'PDF';
@@ -58,6 +59,11 @@ const GRADS: [string, string][] = [
   ['#FFF1F2', '#FFE0E3'], ['#F0F9FF', '#DBEEFE'], ['#FEFCE8', '#FEF3C0'],
   ['#F5F3FF', '#E5DEFF'], ['#FDF4FF', '#F3E8FF'],
 ];
+const GRADS_DARK: [string, string][] = [
+  ['#1E1B4B', '#2E2A6B'], ['#431407', '#7C2D12'], ['#052E16', '#064E3B'],
+  ['#4C0519', '#881337'], ['#0C1A2E', '#1E3A5F'], ['#422006', '#713F12'],
+  ['#2E1065', '#4C1D95'], ['#3B0764', '#581C87'],
+];
 const EMOJIS: Record<string, string> = {
   recipe: '🍜', food: '🍜', cooking: '🍳', ramen: '🍜', meal: '🍽️',
   travel: '✈️', japan: '🗾', trip: '🗺️',
@@ -72,7 +78,8 @@ const EMOJIS: Record<string, string> = {
 
 interface Collection { tag: string; name: string; count: number; thumbnail?: string; colors: [string, string]; emoji: string }
 
-function buildCollections(captures: Capture[]): Collection[] {
+function buildCollections(captures: Capture[], isDark: boolean): Collection[] {
+  const grads = isDark ? GRADS_DARK : GRADS;
   const map = new Map<string, { count: number; thumbnail?: string }>();
   for (const c of captures) {
     for (const tag of c.tags) {
@@ -87,23 +94,21 @@ function buildCollections(captures: Capture[]): Collection[] {
     .slice(0, 8)
     .map(([tag, { count, thumbnail }], i) => ({
       tag, name: tag.charAt(0).toUpperCase() + tag.slice(1),
-      count, thumbnail, colors: GRADS[i % GRADS.length], emoji: EMOJIS[tag] ?? '📁',
+      count, thumbnail, colors: grads[i % grads.length], emoji: EMOJIS[tag] ?? '📁',
     }));
 }
 
 // ── Sub-components ───────────────────────────────────────────
 
-function LargeCard({ item, onDelete }: { item: Capture; onDelete: (id: string) => void }) {
-  const type = getContentType(item);
-  const domain = getDomain(item.url);
+function LargeCard({ item, onEdit, onDelete }: { item: Capture; onEdit: (item: Capture) => void; onDelete: (id: string) => void }) {
+  const { colors } = useTheme();
+  const s = useMemo(() => makeStyles(colors), [colors]);
+  const type       = getContentType(item);
+  const domain     = getDomain(item.url);
   const badgeLabel = item.category ? item.category.charAt(0).toUpperCase() + item.category.slice(1) : type;
 
   return (
-    <TouchableOpacity
-      style={s.largeCard}
-      onPress={() => item.url ? Linking.openURL(item.url) : null}
-      activeOpacity={0.85}
-    >
+    <TouchableOpacity style={s.largeCard} onPress={() => item.url ? Linking.openURL(item.url) : null} activeOpacity={0.85}>
       <View style={s.largeThumbWrap}>
         {item.thumbnail_url ? (
           <Image source={{ uri: item.thumbnail_url }} style={s.largeThumb} resizeMode="cover" />
@@ -111,34 +116,33 @@ function LargeCard({ item, onDelete }: { item: Capture; onDelete: (id: string) =
           <View style={[s.largeThumb, s.largeThumbPlaceholder]}>
             {item.site_name
               ? <Text style={s.largeThumbInitial}>{item.site_name.charAt(0).toUpperCase()}</Text>
-              : <Ionicons name={getTypeIcon(type)} size={34} color="#A0AEC0" />}
+              : <Ionicons name={getTypeIcon(type)} size={34} color={colors.textMuted} />}
           </View>
         )}
         <View style={s.badge}>
           <Text style={s.badgeText}>{badgeLabel}</Text>
         </View>
       </View>
-
       <View style={s.largeInfo}>
         <Text style={s.largeTitle} numberOfLines={2}>{item.title || item.content}</Text>
-        <Text style={s.largeMeta} numberOfLines={1}>
-          {item.site_name || domain || 'Link'}
-        </Text>
+        <Text style={s.largeMeta} numberOfLines={1}>{item.site_name || domain || 'Link'}</Text>
         <Text style={s.largeTime}>{formatDate(item.created_at)}</Text>
       </View>
-
-      <TouchableOpacity
-        style={s.deleteBtn}
-        onPress={() => onDelete(item.id)}
-        hitSlop={{ top: 10, right: 10, bottom: 10, left: 10 }}
-      >
-        <Ionicons name="close" size={14} color="#CBD5E0" />
-      </TouchableOpacity>
+      <View style={{ position: 'absolute', top: 8, right: 8, flexDirection: 'row', gap: 4 }}>
+        <TouchableOpacity style={s.deleteBtn} onPress={() => onEdit(item)} hitSlop={{ top: 8, right: 8, bottom: 8, left: 8 }}>
+          <Ionicons name="pencil" size={13} color="#CBD5E0" />
+        </TouchableOpacity>
+        <TouchableOpacity style={s.deleteBtn} onPress={() => onDelete(item.id)} hitSlop={{ top: 8, right: 8, bottom: 8, left: 8 }}>
+          <Ionicons name="close" size={14} color="#CBD5E0" />
+        </TouchableOpacity>
+      </View>
     </TouchableOpacity>
   );
 }
 
 function CollectionCard({ col, onPress }: { col: Collection; onPress: () => void }) {
+  const { colors } = useTheme();
+  const s = useMemo(() => makeStyles(colors), [colors]);
   return (
     <TouchableOpacity style={s.colCard} activeOpacity={0.85} onPress={onPress}>
       <LinearGradient colors={col.colors} style={s.colGradient} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}>
@@ -152,23 +156,21 @@ function CollectionCard({ col, onPress }: { col: Collection; onPress: () => void
   );
 }
 
-function RecentItem({ item, onDelete }: { item: Capture; onDelete: (id: string) => void }) {
-  const type = getContentType(item);
+function RecentItem({ item, onEdit, onDelete }: { item: Capture; onEdit: (item: Capture) => void; onDelete: (id: string) => void }) {
+  const { colors } = useTheme();
+  const s    = useMemo(() => makeStyles(colors), [colors]);
+  const type   = getContentType(item);
   const domain = getDomain(item.url);
 
   return (
-    <TouchableOpacity
-      style={s.recentItem}
-      onPress={() => item.url ? Linking.openURL(item.url) : null}
-      activeOpacity={0.8}
-    >
+    <TouchableOpacity style={s.recentItem} onPress={() => item.url ? Linking.openURL(item.url) : null} activeOpacity={0.8}>
       {item.thumbnail_url ? (
         <Image source={{ uri: item.thumbnail_url }} style={s.recentThumb} resizeMode="cover" />
       ) : (
         <View style={[s.recentThumb, s.recentPlaceholder]}>
           {item.site_name
             ? <Text style={s.recentInitial}>{item.site_name.charAt(0).toUpperCase()}</Text>
-            : <Ionicons name={getTypeIcon(type)} size={20} color="#A0AEC0" />}
+            : <Ionicons name={getTypeIcon(type)} size={20} color={colors.textMuted} />}
         </View>
       )}
       <View style={s.recentText}>
@@ -176,9 +178,14 @@ function RecentItem({ item, onDelete }: { item: Capture; onDelete: (id: string) 
         <Text style={s.recentMeta}>{item.site_name || domain}</Text>
         <Text style={s.recentTime}>{formatDate(item.created_at)}</Text>
       </View>
-      <TouchableOpacity onPress={() => onDelete(item.id)} hitSlop={{ top: 8, right: 8, bottom: 8, left: 8 }}>
-        <Ionicons name="ellipsis-vertical" size={14} color="#CBD5E0" />
-      </TouchableOpacity>
+      <View style={{ flexDirection: 'row', gap: 6 }}>
+        <TouchableOpacity onPress={() => onEdit(item)} hitSlop={{ top: 8, right: 8, bottom: 8, left: 8 }}>
+          <Ionicons name="pencil-outline" size={14} color={colors.textMuted} />
+        </TouchableOpacity>
+        <TouchableOpacity onPress={() => onDelete(item.id)} hitSlop={{ top: 8, right: 8, bottom: 8, left: 8 }}>
+          <Ionicons name="trash-outline" size={14} color={colors.textMuted} />
+        </TouchableOpacity>
+      </View>
     </TouchableOpacity>
   );
 }
@@ -188,46 +195,34 @@ function RecentItem({ item, onDelete }: { item: Capture; onDelete: (id: string) 
 interface Props { captures: Capture[]; session: Session; onRefresh: () => void }
 
 export default function WebHomeScreen({ captures, session, onRefresh }: Props) {
-  const [search, setSearch]                       = useState('');
-  const [terms, setTerms]                         = useState<string[]>([]);
-  const [searching, setSearching]                 = useState(false);
-  const [activeCollection, setActiveCollection]   = useState<string | null>(null);
+  const { colors, isDark } = useTheme();
+  const s = useMemo(() => makeStyles(colors), [colors]);
+
+  const [search, setSearch]                     = useState('');
+  const [activeCollection, setActiveCollection] = useState<string | null>(null);
+  const [editTarget, setEditTarget]             = useState<Capture | null>(null);
+  const [editTitle, setEditTitle]               = useState('');
+  const [editNote, setEditNote]                 = useState('');
 
   const username = session.user.user_metadata?.username ?? session.user.email?.split('@')[0] ?? 'there';
 
-  useEffect(() => {
-    const q = search.trim().toLowerCase();
-    if (!q) { setTerms([]); setSearching(false); return; }
-    setTerms([q]);
-    setSearching(true);
-    const t = setTimeout(async () => {
-      setTerms(await expandSearchQuery(q));
-      setSearching(false);
-    }, 400);
-    return () => clearTimeout(t);
-  }, [search]);
-
-  // When search changes, clear active collection
   useEffect(() => { if (search.trim()) setActiveCollection(null); }, [search]);
 
-  const baseFiltered = search.trim()
-    ? captures.filter(c => {
-        const q = search.toLowerCase().trim();
-        const t = terms.length > 0 ? terms : [q];
-        const tagMatch = c.tags.some(tag => t.some(term => tag.includes(term) || term.includes(tag)));
-        const allText  = [c.title, c.content, c.summary, c.description, c.category, c.site_name]
-          .filter(Boolean).join(' ').toLowerCase();
-        const textMatch = t.some(term => allText.includes(term));
-        return tagMatch || textMatch;
-      })
-    : captures;
+  const baseFiltered = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    if (!q) return captures;
+    const scored = captures
+      .map(c => ({ c, score: scoreCapture(c, q) }))
+      .filter(({ score }) => score > 0)
+      .sort((a, b) => b.score - a.score);
+    if (scored.length === 0) return [];
+    const maxScore = scored[0].score;
+    const cutoff   = Math.max(SCORE_THRESHOLD, maxScore * 0.4);
+    return scored.filter(({ score }) => score >= cutoff).map(({ c }) => c);
+  }, [captures, search]);
 
-  // If a collection is active, additionally filter by its tag
-  const filtered = activeCollection
-    ? baseFiltered.filter(c => c.tags.includes(activeCollection))
-    : baseFiltered;
-
-  const collections = buildCollections(captures);
+  const filtered    = activeCollection ? baseFiltered.filter(c => c.tags.includes(activeCollection)) : baseFiltered;
+  const collections = buildCollections(captures, isDark);
   const recentItems = captures.slice(0, 5);
   const showSections = !search.trim() && !activeCollection;
 
@@ -237,29 +232,68 @@ export default function WebHomeScreen({ captures, session, onRefresh }: Props) {
     }
   }
 
-  // Build 2-column rows for "Recently saved"
+  function openEdit(item: Capture) {
+    setEditTarget(item);
+    setEditTitle(item.title ?? '');
+    setEditNote(item.content ?? '');
+  }
+
+  async function saveEdit() {
+    if (!editTarget) return;
+    await updateCapture(editTarget.id, { title: editTitle.trim() || undefined, content: editNote.trim() });
+    setEditTarget(null);
+    onRefresh();
+  }
+
   const rows: Capture[][] = [];
   for (let i = 0; i < filtered.length; i += 2) rows.push(filtered.slice(i, i + 2));
 
   return (
+    <View style={{ flex: 1 }}>
+
+    {/* ── Edit modal ── */}
+    {editTarget && (
+      <View style={s.editOverlay}>
+        <View style={s.editCard}>
+          <Text style={s.editHeading}>Edit</Text>
+
+          <Text style={s.editLabel}>Title</Text>
+          <TextInput style={s.editInput} value={editTitle} onChangeText={setEditTitle}
+            placeholder="Title" placeholderTextColor={colors.textMuted} />
+
+          <Text style={s.editLabel}>Your note</Text>
+          <TextInput style={[s.editInput, { minHeight: 80, textAlignVertical: 'top' }]}
+            value={editNote} onChangeText={setEditNote} multiline
+            placeholder="Add a note…" placeholderTextColor={colors.textMuted} />
+
+          <View style={s.editBtns}>
+            <TouchableOpacity style={s.editCancel} onPress={() => setEditTarget(null)}>
+              <Text style={s.editCancelText}>Cancel</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={s.editSave} onPress={saveEdit}>
+              <Text style={s.editSaveText}>Save</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </View>
+    )}
+
     <ScrollView style={s.container} showsVerticalScrollIndicator={false} contentContainerStyle={s.contentPad}>
 
       {/* ── Header ── */}
       <View style={s.header}>
         <Text style={s.greetingText}>{greeting(username)}</Text>
         <View style={s.searchBar}>
-          <Ionicons name="search" size={16} color="#A0AEC0" style={{ marginRight: 8 }} />
+          <Ionicons name="search" size={16} color={colors.textMuted} style={{ marginRight: 8 }} />
           <TextInput
             style={s.searchInput}
             placeholder='Search… "ramen recipe", "japan trip"'
-            placeholderTextColor="#A0AEC0"
-            value={search}
-            onChangeText={setSearch}
+            placeholderTextColor={colors.textMuted}
+            value={search} onChangeText={setSearch}
           />
-          {searching && <ActivityIndicator size="small" color="#A0AEC0" style={{ marginLeft: 6 }} />}
-          {search.length > 0 && !searching && (
+          {search.length > 0 && (
             <TouchableOpacity onPress={() => setSearch('')}>
-              <Ionicons name="close-circle" size={16} color="#CBD5E0" />
+              <Ionicons name="close-circle" size={16} color={colors.textMuted} />
             </TouchableOpacity>
           )}
         </View>
@@ -270,9 +304,7 @@ export default function WebHomeScreen({ captures, session, onRefresh }: Props) {
         <View style={s.section}>
           <Text style={s.sectionTitle}>Continue where you left off</Text>
           <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.hScroll}>
-            {recentItems.map(item => (
-              <LargeCard key={item.id} item={item} onDelete={confirmDelete} />
-            ))}
+            {recentItems.map(item => <LargeCard key={item.id} item={item} onEdit={openEdit} onDelete={confirmDelete} />)}
           </ScrollView>
         </View>
       )}
@@ -283,11 +315,7 @@ export default function WebHomeScreen({ captures, session, onRefresh }: Props) {
           <Text style={s.sectionTitle}>Smart Collections</Text>
           <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.hScroll}>
             {collections.map(col => (
-              <CollectionCard
-                key={col.tag}
-                col={col}
-                onPress={() => setActiveCollection(col.tag)}
-              />
+              <CollectionCard key={col.tag} col={col} onPress={() => setActiveCollection(col.tag)} />
             ))}
           </ScrollView>
         </View>
@@ -299,7 +327,7 @@ export default function WebHomeScreen({ captures, session, onRefresh }: Props) {
           {activeCollection ? (
             <View style={s.collectionHeader}>
               <TouchableOpacity onPress={() => setActiveCollection(null)} style={s.backBtn} activeOpacity={0.7}>
-                <Ionicons name="arrow-back" size={18} color="#5A67D8" />
+                <Ionicons name="arrow-back" size={18} color={colors.primary} />
               </TouchableOpacity>
               <Text style={[s.sectionTitle, { marginBottom: 0 }]}>
                 {activeCollection.charAt(0).toUpperCase() + activeCollection.slice(1)}
@@ -325,7 +353,7 @@ export default function WebHomeScreen({ captures, session, onRefresh }: Props) {
               <View key={i} style={s.recentRow}>
                 {row.map(item => (
                   <View key={item.id} style={s.recentCell}>
-                    <RecentItem item={item} onDelete={confirmDelete} />
+                    <RecentItem item={item} onEdit={openEdit} onDelete={confirmDelete} />
                   </View>
                 ))}
                 {row.length === 1 && <View style={s.recentCell} />}
@@ -336,106 +364,98 @@ export default function WebHomeScreen({ captures, session, onRefresh }: Props) {
       </View>
 
     </ScrollView>
+    </View>
   );
 }
 
 // ── Styles ───────────────────────────────────────────────────
 
-const s = StyleSheet.create({
-  container:  { flex: 1, backgroundColor: '#F7F8FC' },
-  contentPad: { paddingBottom: 40 },
+function makeStyles(c: ReturnType<typeof useTheme>['colors']) {
+  return StyleSheet.create({
+    container:  { flex: 1, backgroundColor: c.bgSoft },
+    contentPad: { paddingBottom: 40 },
 
-  header: {
-    backgroundColor: '#fff',
-    paddingTop: 32,
-    paddingHorizontal: 32,
-    paddingBottom: 20,
-    borderBottomWidth: 1,
-    borderBottomColor: '#F0F0F0',
-  },
-  greetingText: { fontSize: 24, fontWeight: '700', color: '#1A202C', marginBottom: 14 },
-  searchBar: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#F7F8FC',
-    borderRadius: 14,
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-    maxWidth: 540,
-  },
-  searchInput: { flex: 1, fontSize: 14, color: '#1A202C' },
+    header: {
+      backgroundColor: c.bg,
+      paddingTop: 32, paddingHorizontal: 32, paddingBottom: 20,
+      borderBottomWidth: 1, borderBottomColor: c.border,
+    },
+    greetingText: { fontSize: 24, fontWeight: '700', color: c.text, marginBottom: 14 },
+    searchBar: {
+      flexDirection: 'row', alignItems: 'center',
+      backgroundColor: c.bgSoft, borderRadius: 14,
+      paddingHorizontal: 14, paddingVertical: 10, maxWidth: 540,
+    },
+    searchInput: { flex: 1, fontSize: 14, color: c.text },
 
-  section: { paddingHorizontal: 32, paddingTop: 28 },
-  sectionTitle: { fontSize: 16, fontWeight: '700', color: '#1A202C', marginBottom: 14 },
-  sectionRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 },
-  hScroll: { paddingBottom: 4 },
-  collectionHeader: { flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 14 },
-  backBtn: { padding: 4 },
-  collectionCount: { fontSize: 13, color: '#A0AEC0', fontWeight: '500' },
+    section:          { paddingHorizontal: 32, paddingTop: 28 },
+    sectionTitle:     { fontSize: 16, fontWeight: '700', color: c.text, marginBottom: 14 },
+    sectionRow:       { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 },
+    hScroll:          { paddingBottom: 4 },
+    collectionHeader: { flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 14 },
+    backBtn:          { padding: 4 },
+    collectionCount:  { fontSize: 13, color: c.textMuted, fontWeight: '500' },
 
-  // Large cards ("Continue where you left off")
-  largeCard: {
-    width: 200,
-    backgroundColor: '#fff',
-    borderRadius: 18,
-    marginRight: 14,
-    overflow: 'hidden',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.07,
-    shadowRadius: 8,
-    elevation: 3,
-  },
-  largeThumbWrap: { position: 'relative' },
-  largeThumb: { width: '100%', height: 140 },
-  largeThumbPlaceholder: { backgroundColor: '#EEF2FF', alignItems: 'center', justifyContent: 'center' },
-  largeThumbInitial: { fontSize: 42, fontWeight: '700', color: '#5A67D8' },
-  badge: {
-    position: 'absolute', bottom: 8, left: 8,
-    backgroundColor: 'rgba(0,0,0,0.55)',
-    borderRadius: 6, paddingHorizontal: 7, paddingVertical: 3,
-  },
-  badgeText: { fontSize: 10, color: '#fff', fontWeight: '700', textTransform: 'capitalize' },
-  largeInfo: { padding: 12, paddingTop: 10 },
-  largeTitle: { fontSize: 13, fontWeight: '600', color: '#1A202C', lineHeight: 18, marginBottom: 4 },
-  largeMeta:  { fontSize: 11, color: '#A0AEC0' },
-  largeTime:  { fontSize: 11, color: '#A0AEC0', marginTop: 1 },
-  deleteBtn:  { position: 'absolute', top: 8, right: 8, backgroundColor: 'rgba(0,0,0,0.35)', borderRadius: 10, padding: 3 },
+    // Large cards
+    largeCard: {
+      width: 200, backgroundColor: c.card, borderRadius: 18, marginRight: 14, overflow: 'hidden',
+      shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.07, shadowRadius: 8, elevation: 3,
+    },
+    largeThumbWrap:     { position: 'relative' },
+    largeThumb:         { width: '100%', height: 140 },
+    largeThumbPlaceholder: { backgroundColor: c.primaryBg, alignItems: 'center', justifyContent: 'center' },
+    largeThumbInitial:  { fontSize: 42, fontWeight: '700', color: c.primary },
+    badge: {
+      position: 'absolute', bottom: 8, left: 8,
+      backgroundColor: 'rgba(0,0,0,0.55)',
+      borderRadius: 6, paddingHorizontal: 7, paddingVertical: 3,
+    },
+    badgeText:  { fontSize: 10, color: '#fff', fontWeight: '700', textTransform: 'capitalize' },
+    largeInfo:  { padding: 12, paddingTop: 10 },
+    largeTitle: { fontSize: 13, fontWeight: '600', color: c.text, lineHeight: 18, marginBottom: 4 },
+    largeMeta:  { fontSize: 11, color: c.textMuted },
+    largeTime:  { fontSize: 11, color: c.textMuted, marginTop: 1 },
+    deleteBtn:  { position: 'absolute', top: 8, right: 8, backgroundColor: 'rgba(0,0,0,0.35)', borderRadius: 10, padding: 3 },
 
-  // Collection cards
-  colCard: { width: 170, marginRight: 12, borderRadius: 18, overflow: 'hidden', shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.07, shadowRadius: 8, elevation: 3 },
-  colGradient: { borderRadius: 18, overflow: 'hidden', paddingBottom: 14 },
-  colThumb: { width: '100%', height: 100 },
-  colEmoji: { fontSize: 38, textAlign: 'center', paddingVertical: 20 },
-  colName:  { fontSize: 14, fontWeight: '700', color: '#1A202C', paddingHorizontal: 14, marginTop: 2 },
-  colCount: { fontSize: 12, color: '#718096', paddingHorizontal: 14, marginTop: 2 },
+    // Collection cards
+    colCard:     { width: 170, marginRight: 12, borderRadius: 18, overflow: 'hidden', shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.07, shadowRadius: 8, elevation: 3 },
+    colGradient: { borderRadius: 18, overflow: 'hidden', paddingBottom: 14 },
+    colThumb:    { width: '100%', height: 100 },
+    colEmoji:    { fontSize: 38, textAlign: 'center', paddingVertical: 20 },
+    colName:     { fontSize: 14, fontWeight: '700', color: c.text, paddingHorizontal: 14, marginTop: 2 },
+    colCount:    { fontSize: 12, color: c.textSub, paddingHorizontal: 14, marginTop: 2 },
 
-  // Recently saved grid
-  recentGrid: {},
-  recentRow:  { flexDirection: 'row', gap: 12, marginBottom: 12 },
-  recentCell: { flex: 1 },
-  recentItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#fff',
-    borderRadius: 14,
-    padding: 12,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.05,
-    shadowRadius: 4,
-    elevation: 1,
-  },
-  recentThumb: { width: 60, height: 60, borderRadius: 10, backgroundColor: '#ECEEF2' },
-  recentPlaceholder: { backgroundColor: '#EEF2FF', alignItems: 'center', justifyContent: 'center' },
-  recentInitial: { fontSize: 20, fontWeight: '700', color: '#5A67D8' },
-  recentText: { flex: 1, marginHorizontal: 10 },
-  recentTitle: { fontSize: 13, fontWeight: '600', color: '#1A202C', lineHeight: 17 },
-  recentMeta:  { fontSize: 11, color: '#A0AEC0', marginTop: 3 },
-  recentTime:  { fontSize: 11, color: '#A0AEC0', marginTop: 1 },
+    // Recently saved grid
+    recentGrid: {},
+    recentRow:  { flexDirection: 'row', gap: 12, marginBottom: 12 },
+    recentCell: { flex: 1 },
+    recentItem: {
+      flexDirection: 'row', alignItems: 'center',
+      backgroundColor: c.card, borderRadius: 14, padding: 12,
+      shadowColor: '#000', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.05, shadowRadius: 4, elevation: 1,
+    },
+    recentThumb:      { width: 60, height: 60, borderRadius: 10, backgroundColor: c.border },
+    recentPlaceholder: { backgroundColor: c.primaryBg, alignItems: 'center', justifyContent: 'center' },
+    recentInitial:    { fontSize: 20, fontWeight: '700', color: c.primary },
+    recentText:       { flex: 1, marginHorizontal: 10 },
+    recentTitle:      { fontSize: 13, fontWeight: '600', color: c.text, lineHeight: 17 },
+    recentMeta:       { fontSize: 11, color: c.textMuted, marginTop: 3 },
+    recentTime:       { fontSize: 11, color: c.textMuted, marginTop: 1 },
 
-  empty: { alignItems: 'center', paddingTop: 48 },
-  emptyIcon:  { fontSize: 36 },
-  emptyTitle: { fontSize: 16, fontWeight: '600', color: '#2D3748', marginTop: 10 },
-  emptyText:  { fontSize: 13, color: '#A0AEC0', marginTop: 4 },
-});
+    empty:      { alignItems: 'center', paddingTop: 48 },
+    emptyIcon:  { fontSize: 36 },
+    emptyTitle: { fontSize: 16, fontWeight: '600', color: c.text, marginTop: 10 },
+    emptyText:  { fontSize: 13, color: c.textMuted, marginTop: 4 },
+
+    editOverlay: { position: 'absolute', inset: 0, backgroundColor: 'rgba(0,0,0,0.45)', zIndex: 100, alignItems: 'center', justifyContent: 'center' },
+    editCard:    { backgroundColor: c.bg, borderRadius: 20, padding: 24, width: 420, shadowColor: '#000', shadowOffset: { width: 0, height: 8 }, shadowOpacity: 0.2, shadowRadius: 20 },
+    editHeading: { fontSize: 17, fontWeight: '700', color: c.text, marginBottom: 18 },
+    editLabel:   { fontSize: 12, fontWeight: '600', color: c.textSub, marginBottom: 6 },
+    editInput:   { backgroundColor: c.bgSoft, borderRadius: 12, padding: 12, fontSize: 14, color: c.text, marginBottom: 14 },
+    editBtns:    { flexDirection: 'row', gap: 10, marginTop: 4 },
+    editCancel:  { flex: 1, paddingVertical: 12, borderRadius: 12, borderWidth: 1, borderColor: c.border, alignItems: 'center' },
+    editCancelText: { fontSize: 14, fontWeight: '600', color: c.textSub },
+    editSave:    { flex: 1, paddingVertical: 12, borderRadius: 12, backgroundColor: c.primary, alignItems: 'center' },
+    editSaveText: { fontSize: 14, fontWeight: '700', color: '#fff' },
+  });
+}

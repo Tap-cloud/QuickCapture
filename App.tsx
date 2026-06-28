@@ -8,19 +8,32 @@ import { supabase } from './src/supabase';
 import HomeScreen from './src/HomeScreen';
 import AddScreen from './src/AddScreen';
 import AuthScreen from './src/AuthScreen';
+import OnboardingScreen, { ONBOARDING_KEY } from './src/OnboardingScreen';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import CollectionsScreen from './src/CollectionsScreen';
 import ProfileScreen from './src/ProfileScreen';
 import BottomNav, { MainTab } from './src/BottomNav';
 import WebLayout from './src/WebLayout';
 import { Capture, loadCaptures } from './src/storage';
+import { ThemeProvider, useTheme } from './src/theme';
 
 type AppScreen = 'main' | 'add';
 
 export default function App() {
-  const [session, setSession] = useState<Session | null>(null);
-  const [screen, setScreen] = useState<AppScreen>('main');
-  const [activeTab, setActiveTab] = useState<MainTab>('home');
-  const [captures, setCaptures] = useState<Capture[]>([]);
+  return (
+    <ThemeProvider>
+      <AppInner />
+    </ThemeProvider>
+  );
+}
+
+function AppInner() {
+  const { isDark, colors } = useTheme();
+  const [session, setSession]             = useState<Session | null>(null);
+  const [screen, setScreen]               = useState<AppScreen>('main');
+  const [activeTab, setActiveTab]         = useState<MainTab>('home');
+  const [showOnboarding, setShowOnboarding] = useState(false);
+  const [captures, setCaptures]       = useState<Capture[]>([]);
   const [sharedContent, setSharedContent] = useState('');
 
   const { hasShareIntent, shareIntent, resetShareIntent } = useShareIntentSafe();
@@ -35,9 +48,16 @@ export default function App() {
       setSession(s);
       if (s) refresh();
     });
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, s) => {
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, s) => {
       setSession(s);
-      if (s) refresh();
+      if (s) {
+        refresh();
+        if (event === 'SIGNED_IN') {
+          setActiveTab('home');
+          const seen = await AsyncStorage.getItem(ONBOARDING_KEY);
+          if (!seen) setShowOnboarding(true);
+        }
+      }
     });
     return () => subscription.unsubscribe();
   }, [refresh]);
@@ -57,10 +77,14 @@ export default function App() {
     return <AuthScreen />;
   }
 
+  if (showOnboarding) {
+    return <OnboardingScreen onDone={() => setShowOnboarding(false)} />;
+  }
+
   if (screen === 'add') {
     return (
       <>
-        <StatusBar style="dark" />
+        <StatusBar style={isDark ? 'light' : 'dark'} />
         <AddScreen
           initialContent={sharedContent}
           onDone={() => { setSharedContent(''); refresh(); setScreen('main'); }}
@@ -86,8 +110,8 @@ export default function App() {
 
   if (Platform.OS === 'web') {
     return (
-      <View style={{ flex: 1 }}>
-        <StatusBar style="dark" />
+      <View style={{ flex: 1, backgroundColor: colors.bgSoft }}>
+        <StatusBar style={isDark ? 'light' : 'dark'} />
         <WebLayout
           captures={captures}
           activeTab={activeTab}
@@ -101,8 +125,8 @@ export default function App() {
   }
 
   return (
-    <View style={{ flex: 1 }}>
-      <StatusBar style="dark" />
+    <View style={{ flex: 1, backgroundColor: colors.bg }}>
+      <StatusBar style={isDark ? 'light' : 'dark'} />
       {mainContent}
       <BottomNav
         activeTab={activeTab}

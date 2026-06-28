@@ -52,6 +52,14 @@ export async function addCapture(
   if (error) throw new Error(error.message);
 }
 
+export async function updateCapture(
+  id: string,
+  updates: { content?: string; title?: string },
+): Promise<void> {
+  const { error } = await supabase.from('captures').update(updates).eq('id', id);
+  if (error) throw new Error(error.message);
+}
+
 export async function removeCapture(id: string): Promise<void> {
   const { error } = await supabase.from('captures').delete().eq('id', id);
   if (error) throw new Error(error.message);

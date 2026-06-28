@@ -150,6 +150,21 @@ async function signIn(email, password) {
   return data;
 }
 
+async function tryRefreshSession() {
+  if (!session?.refresh_token) return false;
+  try {
+    const res = await fetch(`${SUPABASE_URL}/auth/v1/token?grant_type=refresh_token`, {
+      method: 'POST',
+      headers: { 'apikey': SUPABASE_ANON_KEY, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ refresh_token: session.refresh_token }),
+    });
+    if (!res.ok) return false;
+    session = await res.json();
+    await chrome.storage.local.set({ qc_session: session });
+    return true;
+  } catch { return false; }
+}
+
 async function saveToSupabase({ content, tags, summary, category, url, title, thumbnailUrl, description, siteName }) {
   const res = await fetch(`${SUPABASE_URL}/rest/v1/captures`, {
     method: 'POST',
@@ -216,9 +231,17 @@ document.addEventListener('DOMContentLoaded', async () => {
   const stored = await chrome.storage.local.get(['qc_session']);
   if (stored.qc_session) {
     session = stored.qc_session;
-    pageMeta = await fetchPageMeta(tab);
-    populateSaveView();
-    showView('save-view');
+    // Silently refresh the token so it never goes stale mid-session
+    const refreshed = await tryRefreshSession();
+    if (!refreshed && !session?.access_token) {
+      session = null;
+      await chrome.storage.local.remove('qc_session');
+      showView('login-view');
+    } else {
+      pageMeta = await fetchPageMeta(tab);
+      populateSaveView();
+      showView('save-view');
+    }
   } else {
     showView('login-view');
   }
@@ -288,14 +311,16 @@ document.addEventListener('DOMContentLoaded', async () => {
       showView('confirm-view');
       setTimeout(() => window.close(), 1800);
     } catch (e) {
-      if (e.message.includes('401') || e.message.includes('JWT')) {
+      const isAuthError = e.message.includes('401') || e.message.includes('JWT')
+        || e.message.includes('foreign key') || e.message.includes('violates');
+      if (isAuthError) {
         session = null;
         await chrome.storage.local.remove('qc_session');
         showView('login-view');
       } else {
         errorEl.textContent = e.message;
         btn.disabled = false;
-        btn.textContent = '✨ Save to Later';
+        btn.textContent = '✨ Save to Cove';
       }
     }
   });
